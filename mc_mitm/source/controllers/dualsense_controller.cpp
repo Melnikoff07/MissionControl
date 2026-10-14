@@ -553,6 +553,19 @@ namespace ams::controller {
             this->HandleTriggerTestCombo(src->input0x31.buttons);
         }
 
+        // A trigger effect that failed to reach the controller would otherwise stay stuck until the next change
+        // (e.g. a short vibration pulse that never gets switched off): resend it, at most 20 times per second
+        if (!m_trigger_effects_always_send && m_trigger_effects_dirty) {
+            u64 now = armGetSystemTick();
+            if (now - m_trigger_retry_tick >= armNsToTicks(50'000'000) && !m_trigger_retry_queued.exchange(true)) {
+                m_trigger_retry_tick = now;
+                async::QueueWork(new async::AsyncFunction([this]() -> ams::Result {
+                    m_trigger_retry_queued = false;
+                    R_RETURN(this->PushRumbleLedState());
+                }));
+            }
+        }
+
         utils::Vec3d<float> accel = {
             .x = -src->input0x31.acc_z / float(m_motion_calibration.acc.z_max),
             .y = -src->input0x31.acc_x / float(m_motion_calibration.acc.x_max),

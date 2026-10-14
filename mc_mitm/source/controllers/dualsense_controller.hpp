@@ -166,6 +166,8 @@ namespace ams::controller {
             , m_base_trigger_effect({})
             , m_trigger_effects_always_send(false)
             , m_trigger_effects_dirty(false)
+            , m_trigger_retry_queued(false)
+            , m_trigger_retry_tick(0)
             , m_trigger_test_mode(false)
             , m_trigger_test_preset(0)
             , m_trigger_test_prev_dpad(0x08)
@@ -220,6 +222,8 @@ namespace ams::controller {
             DualsenseTriggerEffect m_base_trigger_effect;   // Effect from config (trigger travel limit), restored when test mode is off
             bool m_trigger_effects_always_send;             // Original behaviour: resend trigger effects with every output report
             std::atomic<bool> m_trigger_effects_dirty;      // Trigger effects changed and must be sent with the next output report
+            std::atomic<bool> m_trigger_retry_queued;       // A resend of unsent trigger effects is queued
+            u64 m_trigger_retry_tick;                       // Last resend, to rate limit retries
 
             bool m_trigger_test_mode;
             u8 m_trigger_test_preset;
