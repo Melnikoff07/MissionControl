@@ -31,7 +31,8 @@ namespace ams::controller::haptics {
     void NotePrimeResult(u32 failed_mask);
     void NoteChirp();
     void NoteFallback();
-    void NoteInputReport(const u8 *report, size_t size, bool mic);
+    void NoteInputReport(const u8 *report, size_t size, bool mic, u32 phase);
+    void NoteRearm(Result rc);
 
     void GetStatus(HapticsStatus *out);
 

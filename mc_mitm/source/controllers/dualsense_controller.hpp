@@ -187,7 +187,10 @@ namespace ams::controller {
             , m_haptics_counter(0)
             , m_haptics_silent_reports(0)
             , m_haptics_variant(0)
-            , m_haptics_test_ticks(0) { }
+            , m_haptics_test_ticks(0)
+            , m_last_input_tick(0)
+            , m_input_rearm_tick(0)
+            , m_input_rearm_queued(false) { }
 
             virtual Result Initialize() override;
             virtual Result SetVibration(const SwitchMotorData *motor_data) override;
@@ -258,6 +261,9 @@ namespace ams::controller {
             u32 m_haptics_silent_reports;
             u32 m_haptics_variant;              // packet 0x11 layout used for streaming (dualsense_haptics_variant - 1)
             u32 m_haptics_test_ticks;           // startup test: each variant plays a sweep with its own lightbar colour
+            std::atomic<u64> m_last_input_tick; // input watchdog in haptics mode
+            u64 m_input_rearm_tick;
+            std::atomic<bool> m_input_rearm_queued;
 
             DualsenseVersionInfo m_version_info;
             DualsenseImuCalibrationData m_motion_calibration;

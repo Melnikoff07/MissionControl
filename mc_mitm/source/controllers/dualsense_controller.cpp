@@ -114,7 +114,10 @@ namespace ams::controller {
         // Startup test, in haptics thread ticks (~94 per second): per variant the lightbar colour, then the sweep
         constexpr u32 HapticsTestBlockTicks = 300;
         constexpr u32 HapticsTestSweepStart = 20;
-        constexpr u32 HapticsTestDelayTicks = 94;   // wait ~1 s first, the console sets the player colour after connecting
+        constexpr u32 HapticsTestDelayTicks = 470;  // wait ~5 s first: the console sets the player colour after connecting,
+                                                    // and input can be checked with the audio path armed but no stream
+        constexpr u64 InputStallNs = 500'000'000;   // no input reports for this long: re-read feature 0x05
+        constexpr u64 InputRearmIntervalNs = 1'000'000'000;
         constexpr u32 HapticsTestTicks = HapticsTestDelayTicks + HapticsTestBlockTicks * HapticsVariantCount;
 
         // Output report valid_flag0 bits that switch the controller to rumble emulation. While they are set the voice
@@ -320,6 +323,8 @@ namespace ams::controller {
             haptics::NotePrimeResult(prime_failed);
             haptics::NoteChirp();
             m_haptics_test_ticks = 0;
+            m_last_input_tick = armGetSystemTick();
+            m_input_rearm_tick = 0;
             m_haptics_ready = true;
         }
 
@@ -421,7 +426,31 @@ namespace ams::controller {
     }
 
     void DualsenseController::TickHaptics() {
-        if (!m_hd_haptics || !m_haptics_ready) {
+        if (!m_packet_output || !m_haptics_ready) {
+            return;
+        }
+
+        // The controller sometimes stops sending input reports in haptics mode. Reading feature 0x05 is what makes
+        // it send full 0x31 input reports in the first place, so read it again (from the async worker, it blocks)
+        u64 now = armGetSystemTick();
+        if (now - m_last_input_tick > armNsToTicks(InputStallNs) && now - m_input_rearm_tick > armNsToTicks(InputRearmIntervalNs) &&
+            !m_input_rearm_queued.exchange(true)) {
+            m_input_rearm_tick = now;
+            async::QueueWork(new async::AsyncFunction([this, address = m_address]() -> ams::Result {
+                // The controller may have disconnected (and this object been freed) before the worker got here
+                auto handler = LocateHandler(address);
+                if (!handler || handler.get() != this) {
+                    R_SUCCEED();
+                }
+                bluetooth::HidReport feature;
+                Result rc = this->GetReport(0x05, BtdrvBluetoothHhReportType_Feature, &feature);
+                haptics::NoteRearm(rc);
+                m_input_rearm_queued = false;
+                R_SUCCEED();
+            }));
+        }
+
+        if (!m_hd_haptics) {
             return;
         }
 
@@ -570,7 +599,13 @@ namespace ams::controller {
             // With the audio path armed, a 0x31 report flagged with bit 1 of its second byte carries microphone audio
             // instead of the controller state (as handled by DS5Dongle); it must not be read as buttons and sticks
             bool mic = report->id == 0x31 && size > 1 && (report_buffer[1] & 0x02);
-            haptics::NoteInputReport(report_buffer, size, mic);
+            u32 phase = 0;
+            if (m_haptics_ready) {
+                u32 t = m_haptics_test_ticks;
+                phase = t < HapticsTestDelayTicks ? 1 : std::min<u32>(2 + (t - HapticsTestDelayTicks) / HapticsTestBlockTicks, 5);
+            }
+            haptics::NoteInputReport(report_buffer, size, mic, phase);
+            m_last_input_tick = armGetSystemTick();
             if (mic) {
                 return;
             }

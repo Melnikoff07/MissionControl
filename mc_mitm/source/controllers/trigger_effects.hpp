@@ -52,6 +52,9 @@ namespace ams::controller {
         u32 input_mic;      // of those, reports flagged as microphone audio (skipped)
         u32 input_other;    // input reports with other ids
         u8  last_input[8];  // first bytes of the last 0x31 input report
+        u32 input_phase[6]; // 0x31 input reports per startup phase: connect, delay, variant 1-3, after the test
+        u32 rearms;         // feature 0x05 re-reads after input reports stopped
+        u32 rearm_failed;
     };
 
     static_assert(sizeof(TriggerEffect) == 11);
