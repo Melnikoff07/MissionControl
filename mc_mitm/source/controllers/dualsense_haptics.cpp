@@ -76,20 +76,13 @@ namespace ams::controller::haptics {
         ++g_status.fallbacks;
     }
 
-    void NoteRearm(Result rc) {
-        ++g_status.rearms;
-        if (R_FAILED(rc)) {
-            ++g_status.rearm_failed;
-        }
-    }
-
     void NoteInputReport(const u8 *report, size_t size, bool mic, u32 phase) {
         if (report[0] != 0x31) {
             ++g_status.input_other;
             return;
         }
         ++g_status.input_reports;
-        ++g_status.input_phase[std::min<u32>(phase, 5)];
+        ++g_status.input_phase[std::min<u32>(phase, 3)];
         if (mic) {
             ++g_status.input_mic;
         }

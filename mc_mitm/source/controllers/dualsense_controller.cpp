@@ -92,33 +92,19 @@ namespace ams::controller {
         // (https://github.com/awalol/DS5Dongle). Their hosts use the 142-byte report 0x32, but on the Switch a lightbar
         // probe showed 0x32 never reaches the controller intact. So the packets go into the 78-byte 0x31 report, with
         // packet 0x11 cut down to the fields DS5Dongle found sufficient (buffer length and packet counter).
+        // The controller keeps sending input reports while this streams.
         constexpr size_t HapticsSampleBytes = 64;          // 32 stereo frames
         constexpr u8 HapticsBufferLength = 48;             // DS5Dongle default
         constexpr u32 HapticsSilentReportsBeforeStop = 10; // keep sending silence ~100 ms, then stop
         constexpr u32 HapticsChirpReports = 141;           // ~1.5 s test sweep
 
-        // Packet 0x11 variants. The flag bits select which fields follow; only bit 6 (packet counter) is known to be
-        // required, the rest is a guess, so the startup test plays each variant with its own lightbar colour.
-        struct HapticsControlVariant {
-            u8 flags;
-            bool buffer_length;
-            RGBColour colour;
-        };
-        constexpr HapticsControlVariant HapticsVariants[] = {
-            { 0x62, true,  {0xFF, 0x00, 0x00} },   // 1 red:   buffer length + counter, bit 1 set
-            { 0x60, true,  {0x00, 0xFF, 0x00} },   // 2 green: buffer length + counter
-            { 0x40, false, {0x00, 0x00, 0xFF} },   // 3 blue:  counter only
-        };
-        constexpr u32 HapticsVariantCount = sizeof(HapticsVariants) / sizeof(HapticsVariants[0]);
+        // Packet 0x11 stream control: flags, buffer length, packet counter. Only bit 6 (counter) is documented as
+        // required. Without bit 1 the controller stops sending input reports (tested on the console), so keep it.
+        constexpr u8 HapticsControlFlags = 0x62;
 
-        // Startup test, in haptics thread ticks (~94 per second): per variant the lightbar colour, then the sweep
-        constexpr u32 HapticsTestBlockTicks = 300;
-        constexpr u32 HapticsTestSweepStart = 20;
-        constexpr u32 HapticsTestDelayTicks = 470;  // wait ~5 s first: the console sets the player colour after connecting,
-                                                    // and input can be checked with the audio path armed but no stream
-        constexpr u64 InputStallNs = 500'000'000;   // no input reports for this long: re-read feature 0x05
-        constexpr u64 InputRearmIntervalNs = 1'000'000'000;
-        constexpr u32 HapticsTestTicks = HapticsTestDelayTicks + HapticsTestBlockTicks * HapticsVariantCount;
+        // Startup test, in haptics thread ticks (~94 per second): a pause with the audio path armed, then the sweep
+        constexpr u32 HapticsTestDelayTicks = 188;  // ~2 s: the console sets the player colour after connecting
+        constexpr u32 HapticsTestTicks = HapticsTestDelayTicks + HapticsChirpReports + HapticsSilentReportsBeforeStop;
 
         // Output report valid_flag0 bits that switch the controller to rumble emulation. While they are set the voice
         // coils play the motor values and ignore the haptics stream, so they stay clear in HD haptics mode.
@@ -258,7 +244,6 @@ namespace ams::controller {
         m_packet_output = hd_haptics;
         m_haptics_audio_pending = hd_haptics;
         m_haptics_gain  = config->misc.dualsense_haptics_gain / 100.0f;
-        m_haptics_variant = std::clamp(config->misc.dualsense_haptics_variant, 1, int(HapticsVariantCount)) - 1;
         const u8 rumble_flags = hd_haptics ? 0x00 : FlagsRumbleEmulation;
 
         m_feature_flags0 = rumble_flags;
@@ -323,8 +308,6 @@ namespace ams::controller {
             haptics::NotePrimeResult(prime_failed);
             haptics::NoteChirp();
             m_haptics_test_ticks = 0;
-            m_last_input_tick = armGetSystemTick();
-            m_input_rearm_tick = 0;
             m_haptics_ready = true;
         }
 
@@ -426,31 +409,7 @@ namespace ams::controller {
     }
 
     void DualsenseController::TickHaptics() {
-        if (!m_packet_output || !m_haptics_ready) {
-            return;
-        }
-
-        // The controller sometimes stops sending input reports in haptics mode. Reading feature 0x05 is what makes
-        // it send full 0x31 input reports in the first place, so read it again (from the async worker, it blocks)
-        u64 now = armGetSystemTick();
-        if (now - m_last_input_tick > armNsToTicks(InputStallNs) && now - m_input_rearm_tick > armNsToTicks(InputRearmIntervalNs) &&
-            !m_input_rearm_queued.exchange(true)) {
-            m_input_rearm_tick = now;
-            async::QueueWork(new async::AsyncFunction([this, address = m_address]() -> ams::Result {
-                // The controller may have disconnected (and this object been freed) before the worker got here
-                auto handler = LocateHandler(address);
-                if (!handler || handler.get() != this) {
-                    R_SUCCEED();
-                }
-                bluetooth::HidReport feature;
-                Result rc = this->GetReport(0x05, BtdrvBluetoothHhReportType_Feature, &feature);
-                haptics::NoteRearm(rc);
-                m_input_rearm_queued = false;
-                R_SUCCEED();
-            }));
-        }
-
-        if (!m_hd_haptics) {
+        if (!m_hd_haptics || !m_haptics_ready) {
             return;
         }
 
@@ -459,39 +418,22 @@ namespace ams::controller {
             std::scoped_lock lk(m_haptics_lock);
             motors = m_haptics_motors;
         }
-        u32 variant = m_haptics_variant;
 
         if (m_haptics_test_ticks < HapticsTestTicks) {
-            // Startup test: every variant shows its colour and plays a 100 -> 300 Hz sweep on both coils
+            // Startup test: a 100 -> 300 Hz sweep on both coils after a pause
             u32 t = m_haptics_test_ticks++;
             if (t < HapticsTestDelayTicks) {
                 return;
             }
-            variant = (t - HapticsTestDelayTicks) / HapticsTestBlockTicks;
-            u32 block_tick = (t - HapticsTestDelayTicks) % HapticsTestBlockTicks;
-            if (block_tick == 0 || block_tick == 10) {
-                R_DISCARD(this->WriteLightbarColour0x31(HapticsVariants[variant].colour));
-                return;
-            }
-            if (block_tick < HapticsTestSweepStart) {
-                return;
-            }
-
-            u32 sweep = block_tick - HapticsTestSweepStart;
-            if (sweep >= HapticsChirpReports + HapticsSilentReportsBeforeStop) {
-                if (t + 1 == HapticsTestTicks) {
-                    // Test done: back to the real colour
-                    m_haptics_silent_reports = HapticsSilentReportsBeforeStop;
-                    R_DISCARD(this->PushRumbleLedState());
-                }
-                return;
-            }
-
+            u32 sweep = t - HapticsTestDelayTicks;
             motors = {};
             if (sweep < HapticsChirpReports) {
                 float freq = 100.0f + 200.0f * float(sweep) / HapticsChirpReports;
                 motors.left_motor  = { .low_band_amp = 1.0f, .low_band_freq = freq, .high_band_amp = 0.0f, .high_band_freq = 320.0f };
                 motors.right_motor = motors.left_motor;
+            }
+            if (t + 1 == HapticsTestTicks) {
+                m_haptics_silent_reports = HapticsSilentReportsBeforeStop;
             }
         } else {
             bool silent = motors.left_motor.low_band_amp  <= 0.0f && motors.left_motor.high_band_amp  <= 0.0f &&
@@ -525,27 +467,23 @@ namespace ams::controller {
             }
         }
 
-        Result rc = this->WriteHapticsReport(variant, samples);
+        Result rc = this->WriteHapticsReport(samples);
         haptics::NoteReportResult(rc);
         if (R_FAILED(rc)) {
             this->HandleHapticsWriteFailure(rc);
         }
     }
 
-    Result DualsenseController::WriteHapticsReport(u32 variant, const u8 *samples) {
-        const HapticsControlVariant &v = HapticsVariants[variant];
-
+    Result DualsenseController::WriteHapticsReport(const u8 *samples) {
         DualsenseReportData report = {};
         report.id = 0x31;
         u8 *data = report.output0x31.data;
 
         size_t i = 1;
         data[i++] = 0x91;   // packet 0x11, sized
-        data[i++] = v.buffer_length ? 3 : 2;
-        data[i++] = v.flags;
-        if (v.buffer_length) {
-            data[i++] = HapticsBufferLength;
-        }
+        data[i++] = 3;
+        data[i++] = HapticsControlFlags;
+        data[i++] = HapticsBufferLength;
         data[i++] = m_haptics_counter++;
         data[i++] = 0x92;   // packet 0x12, sized
         data[i++] = HapticsSampleBytes;
@@ -555,27 +493,6 @@ namespace ams::controller {
 
         std::scoped_lock lk(m_output_lock);
         data[0] = m_output_seq << 4;
-        m_output_seq = (m_output_seq + 1) & 0x0F;
-        report.output0x31.crc = crc32CalculateWithSeed(CrcSeed, report.output0x31.data, sizeof(report.output0x31.data));
-        R_RETURN(this->WriteDataReport(&report, sizeof(report.output0x31) + sizeof(report.id)));
-    }
-
-    Result DualsenseController::WriteLightbarColour0x31(RGBColour colour) {
-        // Only the lightbar colour, in a packet format set state report (seq, packet 0x10)
-        DualsenseReportData report = {};
-        report.id = 0x31;
-        report.output0x31.data[1] = 0x10;
-        u8 *state = &report.output0x31.data[2];
-        state[1]  = 0x04;           // lightbar colour valid
-        state[38] = 0x02 | 0x01;
-        state[41] = 0x02;
-        state[42] = 0x02;
-        state[44] = colour.r;
-        state[45] = colour.g;
-        state[46] = colour.b;
-
-        std::scoped_lock lk(m_output_lock);
-        report.output0x31.data[0] = m_output_seq << 4;
         m_output_seq = (m_output_seq + 1) & 0x0F;
         report.output0x31.crc = crc32CalculateWithSeed(CrcSeed, report.output0x31.data, sizeof(report.output0x31.data));
         R_RETURN(this->WriteDataReport(&report, sizeof(report.output0x31) + sizeof(report.id)));
@@ -602,10 +519,9 @@ namespace ams::controller {
             u32 phase = 0;
             if (m_haptics_ready) {
                 u32 t = m_haptics_test_ticks;
-                phase = t < HapticsTestDelayTicks ? 1 : std::min<u32>(2 + (t - HapticsTestDelayTicks) / HapticsTestBlockTicks, 5);
+                phase = t < HapticsTestDelayTicks ? 1 : t < HapticsTestTicks ? 2 : 3;
             }
             haptics::NoteInputReport(report_buffer, size, mic, phase);
-            m_last_input_tick = armGetSystemTick();
             if (mic) {
                 return;
             }

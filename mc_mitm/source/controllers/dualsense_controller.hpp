@@ -186,11 +186,7 @@ namespace ams::controller {
             , m_haptics_phase{}
             , m_haptics_counter(0)
             , m_haptics_silent_reports(0)
-            , m_haptics_variant(0)
-            , m_haptics_test_ticks(0)
-            , m_last_input_tick(0)
-            , m_input_rearm_tick(0)
-            , m_input_rearm_queued(false) { }
+            , m_haptics_test_ticks(0) { }
 
             virtual Result Initialize() override;
             virtual Result SetVibration(const SwitchMotorData *motor_data) override;
@@ -214,8 +210,7 @@ namespace ams::controller {
             void PrimeAudioFeatures();
             Result PushRumbleLedState();
             void HandleHapticsWriteFailure(Result rc);
-            Result WriteHapticsReport(u32 variant, const u8 *samples);
-            Result WriteLightbarColour0x31(RGBColour colour);
+            Result WriteHapticsReport(const u8 *samples);
             void HandleTriggerTestCombo(const DualsenseButtonData &buttons);
 
             u8 m_feature_flags0;
@@ -259,11 +254,7 @@ namespace ams::controller {
             float m_haptics_phase[4];           // oscillator phases: left low/high, right low/high
             u8 m_haptics_counter;
             u32 m_haptics_silent_reports;
-            u32 m_haptics_variant;              // packet 0x11 layout used for streaming (dualsense_haptics_variant - 1)
-            u32 m_haptics_test_ticks;           // startup test: each variant plays a sweep with its own lightbar colour
-            std::atomic<u64> m_last_input_tick; // input watchdog in haptics mode
-            u64 m_input_rearm_tick;
-            std::atomic<bool> m_input_rearm_queued;
+            u32 m_haptics_test_ticks;           // startup test sweep after connecting
 
             DualsenseVersionInfo m_version_info;
             DualsenseImuCalibrationData m_motion_calibration;
