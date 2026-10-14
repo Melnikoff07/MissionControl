@@ -76,6 +76,10 @@ namespace ams::controller::haptics {
         ++g_status.fallbacks;
     }
 
+    void NoteVoices(u32 count) {
+        g_status.voices += count;
+    }
+
     void NoteInputReport(const u8 *report, size_t size, bool mic, u32 phase) {
         if (report[0] != 0x31) {
             ++g_status.input_other;

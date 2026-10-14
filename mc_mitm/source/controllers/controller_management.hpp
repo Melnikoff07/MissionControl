@@ -111,4 +111,7 @@ namespace ams::controller {
     void SetLightbarOverride(const RGBColour *colour);
     bool GetLightbarOverride(RGBColour *out_colour);
 
+    // Play haptic pattern voices on all controllers that support it, nullptr stops everything
+    void PlayHaptics(const HapticVoices *voices);
+
 }

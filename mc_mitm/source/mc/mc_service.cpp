@@ -32,6 +32,7 @@ namespace ams::mc {
         // Session that last set trigger effects. Only touched from the mc service thread.
         constinit const MissionControlService *g_trigger_effects_owner = nullptr;
         constinit const MissionControlService *g_lightbar_owner = nullptr;
+        constinit const MissionControlService *g_haptics_owner = nullptr;
 
         Result WaitCustomEventInfo() {
             // Wait on custom command reply event
@@ -55,6 +56,10 @@ namespace ams::mc {
         if (g_lightbar_owner == this) {
             g_lightbar_owner = nullptr;
             controller::SetLightbarOverride(nullptr);
+        }
+        if (g_haptics_owner == this) {
+            g_haptics_owner = nullptr;
+            controller::PlayHaptics(nullptr);
         }
     }
 
@@ -123,6 +128,18 @@ namespace ams::mc {
     Result MissionControlService::ClearLightbarColour() {
         g_lightbar_owner = nullptr;
         controller::SetLightbarOverride(nullptr);
+        R_SUCCEED();
+    }
+
+    Result MissionControlService::PlayHaptics(const ams::controller::HapticVoices &voices) {
+        g_haptics_owner = this;
+        controller::PlayHaptics(&voices);
+        R_SUCCEED();
+    }
+
+    Result MissionControlService::StopHaptics() {
+        g_haptics_owner = nullptr;
+        controller::PlayHaptics(nullptr);
         R_SUCCEED();
     }
 

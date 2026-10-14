@@ -53,8 +53,39 @@ namespace ams::controller {
         u32 input_other;    // input reports with other ids
         u8  last_input[8];  // first bytes of the last 0x31 input report
         u32 input_phase[4]; // 0x31 input reports per startup phase: connect, pause, test buzz, after the test
+        u32 voices;         // pattern voices received over mc command 12
     };
 
+    // One voice of a haptic pattern for the DualSense voice coils (mc command 12). A voice is a sine or low-passed noise
+    // whose frequency sweeps from freq_start to freq_end, shaped by an attack / hold / decay envelope after a delay.
+    // Patterns are built from several voices; they are mixed with the game's own rumble.
+    struct HapticVoice {
+        u8  slot;           // 0-7: a voice replaces the one playing in its slot; amplitude 0 on both sides stops the slot
+        u8  flags;          // HapticVoiceFlag_*
+        u8  amp_left;       // 0-255
+        u8  amp_right;
+        u16 freq_start;     // Hz: sine frequency, or the noise low-pass cutoff
+        u16 freq_end;
+        u16 delay_ms;
+        u16 attack_ms;
+        u16 hold_ms;        // a looping voice holds until it is replaced or stopped
+        u16 decay_ms;
+    };
+
+    enum HapticVoiceFlag : u8 {
+        HapticVoiceFlag_Noise = 0x01,
+        HapticVoiceFlag_Loop  = 0x02,
+    };
+
+    constexpr u32 HapticVoiceSlots = 8;
+
+    struct HapticVoices {
+        HapticVoice voices[4];
+        u32 count;
+    };
+
+    static_assert(sizeof(HapticVoice) == 16);
+    static_assert(sizeof(HapticVoices) == 68);
     static_assert(sizeof(TriggerEffect) == 11);
     static_assert(sizeof(TriggerEffects) == 22);
 

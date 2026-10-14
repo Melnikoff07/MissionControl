@@ -419,6 +419,11 @@ namespace ams::controller {
             motors = m_haptics_motors;
         }
 
+        // Pattern voices sent by a client (e.g. the adaptive_triggers module): one frame buffer per side
+        float voice_left[haptics::FramesPerReport];
+        float voice_right[haptics::FramesPerReport];
+        bool voices_playing = this->MixVoices(voice_left, voice_right);
+
         if (m_haptics_test_ticks < HapticsTestTicks) {
             // Startup test: a 100 -> 300 Hz sweep on both coils after a pause
             u32 t = m_haptics_test_ticks++;
@@ -436,7 +441,8 @@ namespace ams::controller {
                 m_haptics_silent_reports = HapticsSilentReportsBeforeStop;
             }
         } else {
-            bool silent = motors.left_motor.low_band_amp  <= 0.0f && motors.left_motor.high_band_amp  <= 0.0f &&
+            bool silent = !voices_playing &&
+                          motors.left_motor.low_band_amp  <= 0.0f && motors.left_motor.high_band_amp  <= 0.0f &&
                           motors.right_motor.low_band_amp <= 0.0f && motors.right_motor.high_band_amp <= 0.0f;
             if (silent) {
                 if (m_haptics_silent_reports >= HapticsSilentReportsBeforeStop) {
@@ -463,7 +469,7 @@ namespace ams::controller {
 
                 float lo_amp = std::sqrt(std::clamp(coil[c]->low_band_amp,  0.0f, 1.0f));
                 float hi_amp = std::sqrt(std::clamp(coil[c]->high_band_amp, 0.0f, 1.0f));
-                float v = lo_amp * std::sin(*phase_lo) + hi_amp * std::sin(*phase_hi);
+                float v = lo_amp * std::sin(*phase_lo) + hi_amp * std::sin(*phase_hi) + (c == 0 ? voice_left : voice_right)[frame];
                 *phase_lo = std::fmod(*phase_lo + TwoPi * lo_freq / haptics::SampleRate, TwoPi);
                 *phase_hi = std::fmod(*phase_hi + TwoPi * hi_freq / haptics::SampleRate, TwoPi);
 
@@ -477,6 +483,100 @@ namespace ams::controller {
         if (R_FAILED(rc)) {
             this->HandleHapticsWriteFailure(rc);
         }
+    }
+
+    void DualsenseController::PlayHaptics(const HapticVoices *voices) {
+        if (!m_hd_haptics) {
+            return;
+        }
+
+        std::scoped_lock lk(m_haptics_lock);
+        if (voices == nullptr) {
+            for (auto &v : m_voices) {
+                v.active = false;
+            }
+            return;
+        }
+
+        constexpr u32 SamplesPerMs = haptics::SampleRate / 1000;
+        for (u32 i = 0; i < std::min<u32>(voices->count, 4); ++i) {
+            const HapticVoice &in = voices->voices[i];
+            ActiveVoice &v = m_voices[in.slot % HapticVoiceSlots];
+            v = {};
+            if (in.amp_left == 0 && in.amp_right == 0) {
+                continue;
+            }
+            v.active     = true;
+            v.noise      = in.flags & HapticVoiceFlag_Noise;
+            v.loop       = in.flags & HapticVoiceFlag_Loop;
+            v.amp_left   = in.amp_left  / 255.0f;
+            v.amp_right  = in.amp_right / 255.0f;
+            v.freq_start = std::clamp<float>(in.freq_start, 10.0f, 1400.0f);
+            v.freq_end   = std::clamp<float>(in.freq_end,   10.0f, 1400.0f);
+            v.delay      = in.delay_ms  * SamplesPerMs;
+            v.attack     = in.attack_ms * SamplesPerMs;
+            v.hold       = in.hold_ms   * SamplesPerMs;
+            v.decay      = in.decay_ms  * SamplesPerMs;
+        }
+    }
+
+    bool DualsenseController::MixVoices(float *left, float *right) {
+        std::memset(left,  0, sizeof(float) * haptics::FramesPerReport);
+        std::memset(right, 0, sizeof(float) * haptics::FramesPerReport);
+
+        bool playing = false;
+        std::scoped_lock lk(m_haptics_lock);
+        for (auto &v : m_voices) {
+            if (!v.active) {
+                continue;
+            }
+            playing = true;
+
+            for (u32 frame = 0; frame < haptics::FramesPerReport; ++frame) {
+                u32 t = v.position++;
+                if (t < v.delay) {
+                    continue;
+                }
+                t -= v.delay;
+
+                // Envelope: linear attack, hold, decay with a quadratic tail so hits fade like a thump
+                float env;
+                u32 sustain_end = v.attack + v.hold;
+                if (t < v.attack) {
+                    env = float(t) / v.attack;
+                } else if (v.loop || t < sustain_end) {
+                    env = 1.0f;
+                } else if (t < sustain_end + v.decay) {
+                    float x = 1.0f - float(t - sustain_end) / v.decay;
+                    env = x * x;
+                } else {
+                    v.active = false;
+                    break;
+                }
+
+                // Frequency sweep over the whole voice (a looping voice reaches freq_end when its hold ends)
+                u32 sweep_len = v.loop ? sustain_end : sustain_end + v.decay;
+                float progress = sweep_len > 0 ? std::min(1.0f, float(t) / sweep_len) : 1.0f;
+                float freq = v.freq_start + (v.freq_end - v.freq_start) * progress;
+
+                float value;
+                if (v.noise) {
+                    // White noise through a one-pole low-pass, scaled back up to a similar loudness as a sine
+                    m_noise_seed = m_noise_seed * 1664525u + 1013904223u;
+                    float white = float(static_cast<s32>(m_noise_seed)) / 2147483648.0f;
+                    float a = 1.0f - std::exp(-TwoPi * freq / haptics::SampleRate);
+                    v.noise_state += a * (white - v.noise_state);
+                    value = std::clamp(v.noise_state * 1.2f / std::sqrt(a), -1.0f, 1.0f);
+                } else {
+                    value = std::sin(v.phase);
+                    v.phase = std::fmod(v.phase + TwoPi * freq / haptics::SampleRate, TwoPi);
+                }
+
+                left[frame]  += env * v.amp_left  * value;
+                right[frame] += env * v.amp_right * value;
+            }
+        }
+        return playing;
     }
 
     Result DualsenseController::WriteHapticsReport(const u8 *samples) {

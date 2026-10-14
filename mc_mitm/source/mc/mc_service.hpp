@@ -33,6 +33,8 @@
     AMS_SF_METHOD_INFO(C, H, 9, Result, SetLightbarColour,     (const ams::controller::RGBColour &colour),                                             (colour)                    ) \
     AMS_SF_METHOD_INFO(C, H, 10, Result, ClearLightbarColour,  (),                                                                                      ()                          ) \
     AMS_SF_METHOD_INFO(C, H, 11, Result, GetHapticsStatus,     (sf::Out<ams::controller::HapticsStatus> out),                                          (out)                       ) \
+    AMS_SF_METHOD_INFO(C, H, 12, Result, PlayHaptics,          (const ams::controller::HapticVoices &voices),                                          (voices)                    ) \
+    AMS_SF_METHOD_INFO(C, H, 13, Result, StopHaptics,          (),                                                                                      ()                          ) \
 
 AMS_SF_DEFINE_INTERFACE(ams::mc, IMissionControlInterface, AMS_MISSION_CONTROL_INTERFACE_INFO, 0x30eba3d4)
 
@@ -54,6 +56,8 @@ namespace ams::mc {
             Result SetLightbarColour(const ams::controller::RGBColour &colour);
             Result ClearLightbarColour();
             Result GetHapticsStatus(sf::Out<ams::controller::HapticsStatus> out);
+            Result PlayHaptics(const ams::controller::HapticVoices &voices);
+            Result StopHaptics();
     };
     static_assert(IsIMissionControlInterface<MissionControlService>);
 

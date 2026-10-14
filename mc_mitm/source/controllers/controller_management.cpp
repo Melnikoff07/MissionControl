@@ -16,6 +16,7 @@
 #include "controller_management.hpp"
 #include <stratosphere.hpp>
 #include "../utils.hpp"
+#include "dualsense_haptics.hpp"
 
 namespace ams::controller {
 
@@ -391,6 +392,15 @@ namespace ams::controller {
 
         for (auto &controller : controllers) {
             R_DISCARD(controller->SetLightbarOverride(colour));
+        }
+    }
+
+    void PlayHaptics(const HapticVoices *voices) {
+        if (voices) {
+            haptics::NoteVoices(std::min<u32>(voices->count, 4));
+        }
+        for (auto &controller : GetControllers()) {
+            controller->PlayHaptics(voices);
         }
     }
 

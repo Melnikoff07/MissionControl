@@ -186,7 +186,9 @@ namespace ams::controller {
             , m_haptics_phase{}
             , m_haptics_counter(0)
             , m_haptics_silent_reports(0)
-            , m_haptics_test_ticks(0) { }
+            , m_haptics_test_ticks(0)
+            , m_voices{}
+            , m_noise_seed(0x12345678) { }
 
             virtual Result Initialize() override;
             virtual Result SetVibration(const SwitchMotorData *motor_data) override;
@@ -198,6 +200,7 @@ namespace ams::controller {
             virtual bool GetAnalogTriggers(AnalogTriggerState *out) const override;
             virtual Result SetLightbarOverride(const RGBColour *colour) override;
             virtual void TickHaptics() override;
+            virtual void PlayHaptics(const HapticVoices *voices) override;
 
             virtual void ParseInputReport(const u8 *report_buffer, size_t size) override;
 
@@ -211,6 +214,7 @@ namespace ams::controller {
             Result PushRumbleLedState();
             void HandleHapticsWriteFailure(Result rc);
             Result WriteHapticsReport(const u8 *samples);
+            bool MixVoices(float *left, float *right);
             void HandleTriggerTestCombo(const DualsenseButtonData &buttons);
 
             u8 m_feature_flags0;
@@ -255,6 +259,26 @@ namespace ams::controller {
             u8 m_haptics_counter;
             u32 m_haptics_silent_reports;
             u32 m_haptics_test_ticks;           // startup test sweep after connecting
+
+            // Pattern voices from mc command 12, under m_haptics_lock
+            struct ActiveVoice {
+                bool active;
+                bool noise;
+                bool loop;
+                float amp_left;
+                float amp_right;
+                float freq_start;
+                float freq_end;
+                u32 delay;          // in samples
+                u32 attack;
+                u32 hold;
+                u32 decay;
+                u32 position;
+                float phase;
+                float noise_state;
+            };
+            ActiveVoice m_voices[HapticVoiceSlots];
+            u32 m_noise_seed;
 
             DualsenseVersionInfo m_version_info;
             DualsenseImuCalibrationData m_motion_calibration;

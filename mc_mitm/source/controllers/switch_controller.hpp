@@ -57,6 +57,7 @@ namespace ams::controller {
             virtual bool GetAnalogTriggers(AnalogTriggerState *out) const { AMS_UNUSED(out); return false; }
             // Lightbar colour requested over IPC, nullptr restores the player colour. Ignored by controllers without a lightbar.
             virtual Result SetLightbarOverride(const RGBColour *colour) { AMS_UNUSED(colour); R_SUCCEED(); }
+            virtual void PlayHaptics(const HapticVoices *voices) { AMS_UNUSED(voices); }
             // Called every 10.67 ms by the haptics thread when HD haptics are enabled
             virtual void TickHaptics() { }
 
