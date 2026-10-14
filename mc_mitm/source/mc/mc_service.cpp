@@ -30,6 +30,7 @@ namespace ams::mc {
 
         // Session that last set trigger effects. Only touched from the mc service thread.
         constinit const MissionControlService *g_trigger_effects_owner = nullptr;
+        constinit const MissionControlService *g_lightbar_owner = nullptr;
 
         Result WaitCustomEventInfo() {
             // Wait on custom command reply event
@@ -45,10 +46,14 @@ namespace ams::mc {
     }
 
     MissionControlService::~MissionControlService() {
-        // Client went away (closed its session or crashed): restore default trigger effects
+        // Client went away (closed its session or crashed): restore default trigger effects and lightbar
         if (g_trigger_effects_owner == this) {
             g_trigger_effects_owner = nullptr;
             controller::SetTriggerEffectsOverride(nullptr);
+        }
+        if (g_lightbar_owner == this) {
+            g_lightbar_owner = nullptr;
+            controller::SetLightbarOverride(nullptr);
         }
     }
 
@@ -98,6 +103,25 @@ namespace ams::mc {
     Result MissionControlService::SetTriggerEffects(const ams::controller::TriggerEffects &effects) {
         g_trigger_effects_owner = this;
         controller::SetTriggerEffectsOverride(&effects);
+        R_SUCCEED();
+    }
+
+    Result MissionControlService::GetAnalogTriggers(sf::Out<ams::controller::AnalogTriggerState> out) {
+        ams::controller::AnalogTriggerState state = {};
+        controller::GetAnalogTriggers(&state);
+        out.SetValue(state);
+        R_SUCCEED();
+    }
+
+    Result MissionControlService::SetLightbarColour(const ams::controller::RGBColour &colour) {
+        g_lightbar_owner = this;
+        controller::SetLightbarOverride(&colour);
+        R_SUCCEED();
+    }
+
+    Result MissionControlService::ClearLightbarColour() {
+        g_lightbar_owner = nullptr;
+        controller::SetLightbarOverride(nullptr);
         R_SUCCEED();
     }
 

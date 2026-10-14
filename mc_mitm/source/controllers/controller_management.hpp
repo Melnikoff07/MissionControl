@@ -101,4 +101,11 @@ namespace ams::controller {
     void SetTriggerEffectsOverride(const TriggerEffects *effects);
     bool GetTriggerEffectsOverride(TriggerEffects *out_effects);
 
+    // Analog trigger positions of the first connected controller that reports them
+    bool GetAnalogTriggers(AnalogTriggerState *out);
+
+    // Lightbar colour requested over IPC, same rules as the trigger effects override
+    void SetLightbarOverride(const RGBColour *colour);
+    bool GetLightbarOverride(RGBColour *out_colour);
+
 }

@@ -46,6 +46,9 @@ namespace ams::controller {
         constinit TriggerEffects g_trigger_effects_override = {};
         constinit bool g_trigger_effects_override_active = false;
 
+        constinit RGBColour g_lightbar_override = {};
+        constinit bool g_lightbar_override_active = false;
+
     }
 
     ControllerType Identify(const bluetooth::DevicesSettings *device) {
@@ -373,6 +376,40 @@ namespace ams::controller {
             *out_effects = g_trigger_effects_override;
         }
         return g_trigger_effects_override_active;
+    }
+
+    void SetLightbarOverride(const RGBColour *colour) {
+        std::vector<std::shared_ptr<SwitchController>> controllers;
+        {
+            std::scoped_lock lk(g_controller_lock);
+            g_lightbar_override_active = colour != nullptr;
+            if (colour) {
+                g_lightbar_override = *colour;
+            }
+            controllers = g_controllers;
+        }
+
+        for (auto &controller : controllers) {
+            R_DISCARD(controller->SetLightbarOverride(colour));
+        }
+    }
+
+    bool GetLightbarOverride(RGBColour *out_colour) {
+        std::scoped_lock lk(g_controller_lock);
+        if (g_lightbar_override_active) {
+            *out_colour = g_lightbar_override;
+        }
+        return g_lightbar_override_active;
+    }
+
+    bool GetAnalogTriggers(AnalogTriggerState *out) {
+        std::scoped_lock lk(g_controller_lock);
+        for (auto &controller : g_controllers) {
+            if (controller->GetAnalogTriggers(out)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     std::shared_ptr<SwitchController> LocateHandler(bluetooth::Address address) {

@@ -169,7 +169,11 @@ namespace ams::controller {
             , m_trigger_test_mode(false)
             , m_trigger_test_preset(0)
             , m_trigger_test_prev_dpad(0x08)
-            , m_trigger_test_saved_colour({0, 0, 0}) { }
+            , m_trigger_test_saved_colour({0, 0, 0})
+            , m_analog_left_trigger(0)
+            , m_analog_right_trigger(0)
+            , m_lightbar_override_active(false)
+            , m_player_colour({0, 0, 0}) { }
 
             virtual Result Initialize() override;
             virtual Result SetVibration(const SwitchMotorData *motor_data) override;
@@ -178,6 +182,8 @@ namespace ams::controller {
             Result SetLightbarColour(RGBColour colour);
             Result SetTriggerEffects(const DualsenseTriggerEffect &right, const DualsenseTriggerEffect &left);
             virtual Result SetTriggerEffectsOverride(const TriggerEffects *effects) override;
+            virtual bool GetAnalogTriggers(AnalogTriggerState *out) const override;
+            virtual Result SetLightbarOverride(const RGBColour *colour) override;
 
             virtual void ParseInputReport(const u8 *report_buffer, size_t size) override;
 
@@ -209,6 +215,12 @@ namespace ams::controller {
             u8 m_trigger_test_preset;
             u8 m_trigger_test_prev_dpad;
             RGBColour m_trigger_test_saved_colour;
+
+            std::atomic<u8> m_analog_left_trigger;
+            std::atomic<u8> m_analog_right_trigger;
+
+            bool m_lightbar_override_active;
+            RGBColour m_player_colour;  // Colour from SetPlayerLed, restored when the override is cleared
 
             DualsenseVersionInfo m_version_info;
             DualsenseImuCalibrationData m_motion_calibration;

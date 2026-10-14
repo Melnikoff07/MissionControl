@@ -18,6 +18,7 @@
 #include "mc_types.hpp"
 #include "../bluetooth_mitm/bluetooth/bluetooth_types.hpp"
 #include "../controllers/trigger_effects.hpp"
+#include "../controllers/switch_types.hpp"
 
 #define AMS_MISSION_CONTROL_INTERFACE_INFO(C, H)                                                                                                                                      \
     AMS_SF_METHOD_INFO(C, H, 0, Result, GetVersion,            (sf::Out<u32> version),                                                                  (version)                   ) \
@@ -28,6 +29,9 @@
     AMS_SF_METHOD_INFO(C, H, 5, Result, DmSetConfig,           (const ams::mc::BsaSetConfig &set_config),                                               (set_config)                ) \
     AMS_SF_METHOD_INFO(C, H, 6, Result, SetTriggerEffects,     (const ams::controller::TriggerEffects &effects),                                       (effects)                   ) \
     AMS_SF_METHOD_INFO(C, H, 7, Result, ClearTriggerEffects,   (),                                                                                      ()                          ) \
+    AMS_SF_METHOD_INFO(C, H, 8, Result, GetAnalogTriggers,     (sf::Out<ams::controller::AnalogTriggerState> out),                                     (out)                       ) \
+    AMS_SF_METHOD_INFO(C, H, 9, Result, SetLightbarColour,     (const ams::controller::RGBColour &colour),                                             (colour)                    ) \
+    AMS_SF_METHOD_INFO(C, H, 10, Result, ClearLightbarColour,  (),                                                                                      ()                          ) \
 
 AMS_SF_DEFINE_INTERFACE(ams::mc, IMissionControlInterface, AMS_MISSION_CONTROL_INTERFACE_INFO, 0x30eba3d4)
 
@@ -45,6 +49,9 @@ namespace ams::mc {
             Result DmSetConfig(const ams::mc::BsaSetConfig &set_config);
             Result SetTriggerEffects(const ams::controller::TriggerEffects &effects);
             Result ClearTriggerEffects();
+            Result GetAnalogTriggers(sf::Out<ams::controller::AnalogTriggerState> out);
+            Result SetLightbarColour(const ams::controller::RGBColour &colour);
+            Result ClearLightbarColour();
     };
     static_assert(IsIMissionControlInterface<MissionControlService>);
 

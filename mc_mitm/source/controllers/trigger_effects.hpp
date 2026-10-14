@@ -29,6 +29,14 @@ namespace ams::controller {
         TriggerEffect left;
     } PACKED;
 
+    // Raw analog trigger positions of a controller with analog triggers (0 = released, 255 = fully pressed)
+    struct AnalogTriggerState {
+        u8 left;
+        u8 right;
+        u8 valid;
+        u8 reserved;
+    };
+
     static_assert(sizeof(TriggerEffect) == 11);
     static_assert(sizeof(TriggerEffects) == 22);
 
