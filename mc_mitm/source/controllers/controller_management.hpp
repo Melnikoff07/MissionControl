@@ -96,4 +96,9 @@ namespace ams::controller {
     void RemoveHandler(bluetooth::Address address);
     std::shared_ptr<SwitchController> LocateHandler(bluetooth::Address address);
 
+    // Trigger effects requested over IPC. Applied to all connected controllers and remembered for ones that connect later.
+    // nullptr clears the override and restores each controller's default effects.
+    void SetTriggerEffectsOverride(const TriggerEffects *effects);
+    bool GetTriggerEffectsOverride(TriggerEffects *out_effects);
+
 }

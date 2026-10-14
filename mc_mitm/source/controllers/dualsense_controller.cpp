@@ -14,6 +14,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 #include "dualsense_controller.hpp"
+#include "controller_management.hpp"
 #include "../mcmitm_config.hpp"
 #include "../async/async.hpp"
 #include <stratosphere.hpp>
@@ -240,6 +241,12 @@ namespace ams::controller {
             m_trigger_effects_dirty = true;
         }
 
+        // Pick up effects that were requested over IPC before this controller connected
+        TriggerEffects effects;
+        if (GetTriggerEffectsOverride(&effects)) {
+            R_TRY(this->SetTriggerEffectsOverride(&effects));
+        }
+
         R_SUCCEED();
     }
 
@@ -290,6 +297,20 @@ namespace ams::controller {
         m_trigger_effect_left  = left;
         m_trigger_effects_dirty = true;
         R_RETURN(this->PushRumbleLedState());
+    }
+
+    Result DualsenseController::SetTriggerEffectsOverride(const TriggerEffects *effects) {
+        // An IPC request takes over from a running test preset
+        if (m_trigger_test_preset != 0) {
+            m_trigger_test_preset = 0;
+            m_lightbar_colour = m_trigger_test_saved_colour;
+        }
+
+        if (effects == nullptr) {
+            R_RETURN(this->SetTriggerEffects(m_base_trigger_effect, m_base_trigger_effect));
+        }
+
+        R_RETURN(this->SetTriggerEffects(effects->right, effects->left));
     }
 
     void DualsenseController::ParseInputReport(const u8 *report_buffer, size_t size) {

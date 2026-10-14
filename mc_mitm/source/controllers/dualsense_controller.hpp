@@ -43,11 +43,7 @@ namespace ams::controller {
         u8 unk;
     } PACKED;
 
-    // One trigger's adaptive effect block inside output report 0x31 (11 bytes: mode + 10 parameters)
-    struct DualsenseTriggerEffect {
-        u8 mode;
-        u8 params[10];
-    } PACKED;
+    using DualsenseTriggerEffect = TriggerEffect;
 
     struct DualsenseRumbleData {
         u8 amp_motor_left;
@@ -181,6 +177,7 @@ namespace ams::controller {
             virtual Result SetPlayerLed(SwitchPlayerNumber player_number) override;
             Result SetLightbarColour(RGBColour colour);
             Result SetTriggerEffects(const DualsenseTriggerEffect &right, const DualsenseTriggerEffect &left);
+            virtual Result SetTriggerEffectsOverride(const TriggerEffects *effects) override;
 
             virtual void ParseInputReport(const u8 *report_buffer, size_t size) override;
 

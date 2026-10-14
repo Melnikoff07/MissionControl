@@ -15,6 +15,7 @@
  */
 #pragma once
 #include "switch_types.hpp"
+#include "trigger_effects.hpp"
 #include "../bluetooth_mitm/bluetooth/bluetooth_types.hpp"
 #include "../bluetooth_mitm/bluetooth/bluetooth_hid_report.hpp"
 #include "../async/future_response.hpp"
@@ -50,6 +51,9 @@ namespace ams::controller {
 
             virtual Result Initialize() { R_SUCCEED(); };
             virtual constexpr bool IsOfficialController() const { return true; }
+
+            // Adaptive trigger effects requested over IPC, nullptr restores the default. Ignored by controllers without adaptive triggers.
+            virtual Result SetTriggerEffectsOverride(const TriggerEffects *effects) { AMS_UNUSED(effects); R_SUCCEED(); }
 
             virtual void HandleDataReportEvent(const bluetooth::HidReportEventInfo *event_info);
             virtual void HandleSetReportEvent(const bluetooth::HidReportEventInfo *event_info);

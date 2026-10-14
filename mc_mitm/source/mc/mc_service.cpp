@@ -17,6 +17,7 @@
 #include "../mcmitm_version.hpp"
 #include "../bluetooth_mitm/btdrv_ext.h"
 #include "../bluetooth_mitm/bluetooth/bluetooth_core.hpp"
+#include "../controllers/controller_management.hpp"
 
 namespace ams::mc {
 
@@ -26,6 +27,9 @@ namespace ams::mc {
 
         constinit BtdrvExtCustomEventInfo g_event_info;
         constinit BtdrvExtCustomEventType g_current_event_type;
+
+        // Session that last set trigger effects. Only touched from the mc service thread.
+        constinit const MissionControlService *g_trigger_effects_owner = nullptr;
 
         Result WaitCustomEventInfo() {
             // Wait on custom command reply event
@@ -38,6 +42,14 @@ namespace ams::mc {
             R_RETURN(g_event_info.hci_command_response.status);
         }
 
+    }
+
+    MissionControlService::~MissionControlService() {
+        // Client went away (closed its session or crashed): restore default trigger effects
+        if (g_trigger_effects_owner == this) {
+            g_trigger_effects_owner = nullptr;
+            controller::SetTriggerEffectsOverride(nullptr);
+        }
     }
 
     Result MissionControlService::GetVersion(sf::Out<u32> version) {
@@ -81,6 +93,18 @@ namespace ams::mc {
 
     Result MissionControlService::DmSetConfig(const ams::mc::BsaSetConfig &set_config) {
         R_RETURN(btdrvextDmSetConfig(&set_config.config));
+    }
+
+    Result MissionControlService::SetTriggerEffects(const ams::controller::TriggerEffects &effects) {
+        g_trigger_effects_owner = this;
+        controller::SetTriggerEffectsOverride(&effects);
+        R_SUCCEED();
+    }
+
+    Result MissionControlService::ClearTriggerEffects() {
+        g_trigger_effects_owner = nullptr;
+        controller::SetTriggerEffectsOverride(nullptr);
+        R_SUCCEED();
     }
 
 }

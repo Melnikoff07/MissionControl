@@ -44,12 +44,11 @@ namespace ams::mc {
 
         ServerManager g_server_manager;
 
-        sf::UnmanagedServiceObject<IMissionControlInterface, MissionControlService> g_mission_control_service;
-
         ams::Result ServerManager::OnNeedsToAccept(int port_index, Server *server) {
             switch (port_index) {
                 case PortIndex_MissionControl:
-                    return this->AcceptImpl(server, g_mission_control_service.GetShared());
+                    // One service object per session, so trigger effects set by a client are cleared when its session closes
+                    return this->AcceptImpl(server, sf::CreateSharedObjectEmplaced<IMissionControlInterface, MissionControlService>());
                 AMS_UNREACHABLE_DEFAULT_CASE();
             }
         }

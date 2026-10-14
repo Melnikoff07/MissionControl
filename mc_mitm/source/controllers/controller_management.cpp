@@ -43,6 +43,9 @@ namespace ams::controller {
         constinit os::SdkMutex g_controller_lock;
         std::vector<std::shared_ptr<SwitchController>> g_controllers;
 
+        constinit TriggerEffects g_trigger_effects_override = {};
+        constinit bool g_trigger_effects_override_active = false;
+
     }
 
     ControllerType Identify(const bluetooth::DevicesSettings *device) {
@@ -345,6 +348,31 @@ namespace ams::controller {
                 return;
             }
         }
+    }
+
+    void SetTriggerEffectsOverride(const TriggerEffects *effects) {
+        std::vector<std::shared_ptr<SwitchController>> controllers;
+        {
+            std::scoped_lock lk(g_controller_lock);
+            g_trigger_effects_override_active = effects != nullptr;
+            if (effects) {
+                g_trigger_effects_override = *effects;
+            }
+            controllers = g_controllers;
+        }
+
+        // Talk to the controllers outside the lock
+        for (auto &controller : controllers) {
+            R_DISCARD(controller->SetTriggerEffectsOverride(effects));
+        }
+    }
+
+    bool GetTriggerEffectsOverride(TriggerEffects *out_effects) {
+        std::scoped_lock lk(g_controller_lock);
+        if (g_trigger_effects_override_active) {
+            *out_effects = g_trigger_effects_override;
+        }
+        return g_trigger_effects_override_active;
     }
 
     std::shared_ptr<SwitchController> LocateHandler(bluetooth::Address address) {
