@@ -40,6 +40,8 @@ namespace ams::mitm {
             int dualsense_vibration_intensity;
             int dualsense_adaptive_trigger_travel;
             bool dualsense_trigger_test_mode;
+            bool dualsense_hd_haptics;
+            int dualsense_haptics_gain;
         } misc;
     };
 

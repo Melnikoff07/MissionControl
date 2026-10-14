@@ -173,7 +173,15 @@ namespace ams::controller {
             , m_analog_left_trigger(0)
             , m_analog_right_trigger(0)
             , m_lightbar_override_active(false)
-            , m_player_colour({0, 0, 0}) { }
+            , m_player_colour({0, 0, 0})
+            , m_hd_haptics(false)
+            , m_haptics_gain(1.0f)
+            , m_haptics_motors({})
+            , m_haptics_phase{}
+            , m_haptics_seq(0)
+            , m_haptics_counter(0)
+            , m_haptics_silent_reports(0)
+            , m_haptics_chirp_reports(0) { }
 
             virtual Result Initialize() override;
             virtual Result SetVibration(const SwitchMotorData *motor_data) override;
@@ -184,6 +192,7 @@ namespace ams::controller {
             virtual Result SetTriggerEffectsOverride(const TriggerEffects *effects) override;
             virtual bool GetAnalogTriggers(AnalogTriggerState *out) const override;
             virtual Result SetLightbarOverride(const RGBColour *colour) override;
+            virtual void TickHaptics() override;
 
             virtual void ParseInputReport(const u8 *report_buffer, size_t size) override;
 
@@ -221,6 +230,17 @@ namespace ams::controller {
 
             bool m_lightbar_override_active;
             RGBColour m_player_colour;  // Colour from SetPlayerLed, restored when the override is cleared
+
+            // HD haptics: the game's HD rumble synthesised as audio for the voice coils
+            bool m_hd_haptics;
+            float m_haptics_gain;
+            os::SdkMutex m_haptics_lock;
+            SwitchMotorData m_haptics_motors;   // latest decoded rumble, written by SetVibration
+            float m_haptics_phase[4];           // oscillator phases: left low/high, right low/high
+            u8 m_haptics_seq;
+            u8 m_haptics_counter;
+            u32 m_haptics_silent_reports;
+            u32 m_haptics_chirp_reports;        // startup test sweep, so the stream can be verified without a game
 
             DualsenseVersionInfo m_version_info;
             DualsenseImuCalibrationData m_motion_calibration;

@@ -39,7 +39,9 @@ namespace ams::mitm {
                 .dualsense_enable_player_leds = true,
                 .dualsense_vibration_intensity = 4,
                 .dualsense_adaptive_trigger_travel = 0,
-                .dualsense_trigger_test_mode = false
+                .dualsense_trigger_test_mode = false,
+                .dualsense_hd_haptics = false,
+                .dualsense_haptics_gain = 100
             }
         };
 
@@ -116,6 +118,10 @@ namespace ams::mitm {
                     ParseInt(value, &config->misc.dualsense_adaptive_trigger_travel, 0, 100);
                 } else if (strcasecmp(name, "dualsense_trigger_test_mode") == 0) {
                     ParseBoolean(value, &config->misc.dualsense_trigger_test_mode);
+                } else if (strcasecmp(name, "dualsense_hd_haptics") == 0) {
+                    ParseBoolean(value, &config->misc.dualsense_hd_haptics);
+                } else if (strcasecmp(name, "dualsense_haptics_gain") == 0) {
+                    ParseInt(value, &config->misc.dualsense_haptics_gain, 0, 400);
                 }
             } else {
                 return 0;

@@ -402,6 +402,11 @@ namespace ams::controller {
         return g_lightbar_override_active;
     }
 
+    std::vector<std::shared_ptr<SwitchController>> GetControllers() {
+        std::scoped_lock lk(g_controller_lock);
+        return g_controllers;
+    }
+
     bool GetAnalogTriggers(AnalogTriggerState *out) {
         std::scoped_lock lk(g_controller_lock);
         for (auto &controller : g_controllers) {

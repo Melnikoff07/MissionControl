@@ -17,6 +17,8 @@
 #include "controller_management.hpp"
 #include "../mcmitm_config.hpp"
 #include "../async/async.hpp"
+#include "dualsense_haptics.hpp"
+#include <cmath>
 #include <stratosphere.hpp>
 
 namespace ams::controller {
@@ -83,6 +85,19 @@ namespace ams::controller {
         constexpr u8 LedBrightnessMultipliers[] = { 0, 1, 1 * Step, 2 * Step, 3 * Step, 4 * Step, 5 * Step, 6 * Step, 7 * Step, 8 * Step };
 
         constexpr u32 CrcSeed = 0x8C36CCAE; // CRC32 of {0xa2, 0x31} bytes at beginning of output report
+
+        // Haptics output report 0x32 over Bluetooth. Layout from the SAxense research by egormanga
+        // (https://github.com/egormanga/SAxense, https://apps.sdore.me/SAxense), cross-checked with
+        // awalol/dualsense-bt-haptics:
+        //   [0] 0x32, [1] seq << 4,
+        //   packet 0x11 (header 0x91, length 7): FE 00 00 00 00 FF <counter>,
+        //   packet 0x12 (header 0x92, length 64): 32 stereo frames of signed 8-bit PCM at 3000 Hz,
+        //   zero padding, CRC32 (seeded with 0xA2) in the last 4 bytes. 142 bytes in total.
+        constexpr size_t HapticsReportSize   = 142;
+        constexpr size_t HapticsSamplesStart = 13;
+        constexpr u32 HapticsSilentReportsBeforeStop = 10; // keep sending silence ~100 ms, then stop
+        constexpr u32 HapticsChirpReports = 30;            // ~320 ms test sweep after connecting
+        constexpr float TwoPi = 6.28318530718f;
 
         // Output report valid_flag0 bits that tell the controller to apply the trigger effect blocks
         constexpr u8 FlagRightTriggerEffect = 0x04;
@@ -221,6 +236,11 @@ namespace ams::controller {
         m_feature_flags1 = 0x54;
 
         auto config = mitm::GetGlobalConfig();
+        m_hd_haptics   = config->misc.dualsense_hd_haptics;
+        m_haptics_gain = config->misc.dualsense_haptics_gain / 100.0f;
+        if (m_hd_haptics) {
+            m_haptics_chirp_reports = HapticsChirpReports;
+        }
         m_lightbar_brightness = config->misc.dualsense_lightbar_brightness;
         m_rumble_intensity    = 0x08 - config->misc.dualsense_vibration_intensity; // User setting is inverse of how the controller sets intensity
         m_base_trigger_effect = TriggerEffectOff();
@@ -255,12 +275,25 @@ namespace ams::controller {
     }
 
     Result DualsenseController::SetVibration(const SwitchMotorData *motor_data) {
+        if (m_hd_haptics) {
+            // Played by TickHaptics on the voice coils instead of the simplified rumble
+            std::scoped_lock lk(m_haptics_lock);
+            m_haptics_motors = *motor_data;
+            R_SUCCEED();
+        }
+
         m_rumble_state.amp_motor_left  = static_cast<u8>(255 * std::max(motor_data->left_motor.low_band_amp, motor_data->right_motor.low_band_amp));
         m_rumble_state.amp_motor_right = static_cast<u8>(255 * std::max(motor_data->left_motor.high_band_amp, motor_data->right_motor.high_band_amp));
         return this->PushRumbleLedState();
     }
 
     Result DualsenseController::CancelVibration() {
+        if (m_hd_haptics) {
+            std::scoped_lock lk(m_haptics_lock);
+            m_haptics_motors = {};
+            R_SUCCEED();
+        }
+
         m_rumble_state.amp_motor_left = 0;
         m_rumble_state.amp_motor_right = 0;
         return this->PushRumbleLedState();
@@ -333,6 +366,77 @@ namespace ams::controller {
         out->right = m_analog_right_trigger;
         out->valid = 1;
         return true;
+    }
+
+    void DualsenseController::TickHaptics() {
+        if (!m_hd_haptics) {
+            return;
+        }
+
+        SwitchMotorData motors;
+        {
+            std::scoped_lock lk(m_haptics_lock);
+            motors = m_haptics_motors;
+        }
+
+        // Startup sweep 100 -> 300 Hz on both coils, to check the stream works without a game
+        if (m_haptics_chirp_reports > 0) {
+            float progress = 1.0f - float(m_haptics_chirp_reports) / HapticsChirpReports;
+            float freq = 100.0f + 200.0f * progress;
+            motors.left_motor  = { .low_band_amp = 0.5f, .low_band_freq = freq, .high_band_amp = 0.0f, .high_band_freq = 320.0f };
+            motors.right_motor = motors.left_motor;
+            --m_haptics_chirp_reports;
+        }
+
+        bool silent = motors.left_motor.low_band_amp  <= 0.0f && motors.left_motor.high_band_amp  <= 0.0f &&
+                      motors.right_motor.low_band_amp <= 0.0f && motors.right_motor.high_band_amp <= 0.0f;
+        if (silent) {
+            if (m_haptics_silent_reports >= HapticsSilentReportsBeforeStop) {
+                return;
+            }
+            ++m_haptics_silent_reports;
+        } else {
+            m_haptics_silent_reports = 0;
+        }
+
+        u8 report[HapticsReportSize] = {};
+        report[0]  = 0x32;
+        report[1]  = m_haptics_seq << 4;
+        report[2]  = 0x91;  // packet 0x11, sized
+        report[3]  = 7;
+        report[4]  = 0xFE;
+        report[9]  = 0xFF;
+        report[10] = m_haptics_counter++;
+        report[11] = 0x92;  // packet 0x12, sized
+        report[12] = haptics::FramesPerReport * 2;
+        m_haptics_seq = (m_haptics_seq + 1) & 0x0F;
+
+        // Two bands per coil, phase continuous across reports
+        const SwitchVibrationValues *coil[2] = { &motors.left_motor, &motors.right_motor };
+        for (u32 frame = 0; frame < haptics::FramesPerReport; ++frame) {
+            for (int c = 0; c < 2; ++c) {
+                float *phase_lo = &m_haptics_phase[c * 2];
+                float *phase_hi = &m_haptics_phase[c * 2 + 1];
+                float lo_freq = std::clamp(coil[c]->low_band_freq,  20.0f, 1400.0f);
+                float hi_freq = std::clamp(coil[c]->high_band_freq, 20.0f, 1400.0f);
+
+                float v = coil[c]->low_band_amp * std::sin(*phase_lo) + coil[c]->high_band_amp * std::sin(*phase_hi);
+                *phase_lo = std::fmod(*phase_lo + TwoPi * lo_freq / haptics::SampleRate, TwoPi);
+                *phase_hi = std::fmod(*phase_hi + TwoPi * hi_freq / haptics::SampleRate, TwoPi);
+
+                float s = std::clamp(v * m_haptics_gain * 127.0f, -128.0f, 127.0f);
+                report[HapticsSamplesStart + frame * 2 + c] = static_cast<u8>(static_cast<s8>(s));
+            }
+        }
+
+        static const u32 crc_seed = [] {
+            const u8 header[2] = { 0xA2, 0x32 };
+            return crc32Calculate(header, sizeof(header));
+        }();
+        u32 crc = crc32CalculateWithSeed(crc_seed, &report[1], HapticsReportSize - 1 - 4);
+        std::memcpy(&report[HapticsReportSize - 4], &crc, sizeof(crc));
+
+        R_DISCARD(this->WriteDataReport(report, sizeof(report)));
     }
 
     void DualsenseController::ParseInputReport(const u8 *report_buffer, size_t size) {

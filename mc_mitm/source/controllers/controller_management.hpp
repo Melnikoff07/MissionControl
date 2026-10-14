@@ -104,6 +104,9 @@ namespace ams::controller {
     // Analog trigger positions of the first connected controller that reports them
     bool GetAnalogTriggers(AnalogTriggerState *out);
 
+    // Snapshot of the connected controllers
+    std::vector<std::shared_ptr<SwitchController>> GetControllers();
+
     // Lightbar colour requested over IPC, same rules as the trigger effects override
     void SetLightbarOverride(const RGBColour *colour);
     bool GetLightbarOverride(RGBColour *out_colour);

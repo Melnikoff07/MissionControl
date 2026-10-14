@@ -28,6 +28,7 @@
 #include "bluetooth_mitm/bluetooth/bluetooth_hid_report.hpp"
 #include "bluetooth_mitm/bluetooth/bluetooth_ble.hpp"
 #include "usb/mc_usb_handler.hpp"
+#include "controllers/dualsense_haptics.hpp"
 
 namespace ams::mitm {
 
@@ -74,6 +75,8 @@ namespace ams::mitm {
 
             // Start hid report handling thread
             ams::bluetooth::hid::report::Initialize();
+            // Optional, so a failure here must not take down the sysmodule
+            R_DISCARD(ams::controller::haptics::Initialize());
 
             // Wait for system to call BluetoothEnable
             ams::bluetooth::core::WaitEnabled();
