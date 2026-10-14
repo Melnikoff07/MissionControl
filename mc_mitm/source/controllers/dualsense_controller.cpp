@@ -448,7 +448,10 @@ namespace ams::controller {
             }
         }
 
-        // Two bands per coil, phase continuous across reports
+        // Two bands per coil, phase continuous across reports. Switch games use small amplitudes (the Joy-Con actuators
+        // are much more sensitive than the DualSense voice coils), so amplitudes go through a square root: weak
+        // effects get a lot stronger, full strength stays full. A soft clip instead of a hard one keeps strong
+        // effects from turning harsh when the gain is high.
         u8 samples[HapticsSampleBytes];
         const SwitchVibrationValues *coil[2] = { &motors.left_motor, &motors.right_motor };
         for (u32 frame = 0; frame < haptics::FramesPerReport; ++frame) {
@@ -458,11 +461,13 @@ namespace ams::controller {
                 float lo_freq = std::clamp(coil[c]->low_band_freq,  20.0f, 1400.0f);
                 float hi_freq = std::clamp(coil[c]->high_band_freq, 20.0f, 1400.0f);
 
-                float v = coil[c]->low_band_amp * std::sin(*phase_lo) + coil[c]->high_band_amp * std::sin(*phase_hi);
+                float lo_amp = std::sqrt(std::clamp(coil[c]->low_band_amp,  0.0f, 1.0f));
+                float hi_amp = std::sqrt(std::clamp(coil[c]->high_band_amp, 0.0f, 1.0f));
+                float v = lo_amp * std::sin(*phase_lo) + hi_amp * std::sin(*phase_hi);
                 *phase_lo = std::fmod(*phase_lo + TwoPi * lo_freq / haptics::SampleRate, TwoPi);
                 *phase_hi = std::fmod(*phase_hi + TwoPi * hi_freq / haptics::SampleRate, TwoPi);
 
-                float s = std::clamp(v * m_haptics_gain * 127.0f, -128.0f, 127.0f);
+                float s = std::clamp(std::tanh(v * m_haptics_gain) * 127.0f, -128.0f, 127.0f);
                 samples[frame * 2 + c] = static_cast<u8>(static_cast<s8>(s));
             }
         }
