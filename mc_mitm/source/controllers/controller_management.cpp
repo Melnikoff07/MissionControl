@@ -427,6 +427,16 @@ namespace ams::controller {
         return false;
     }
 
+    bool GetControllerInput(ControllerInput *out) {
+        std::scoped_lock lk(g_controller_lock);
+        for (auto &controller : g_controllers) {
+            if (controller->GetControllerInput(out)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     std::shared_ptr<SwitchController> LocateHandler(bluetooth::Address address) {
         std::scoped_lock lk(g_controller_lock);
 

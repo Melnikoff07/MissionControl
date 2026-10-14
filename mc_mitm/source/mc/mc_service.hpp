@@ -35,6 +35,7 @@
     AMS_SF_METHOD_INFO(C, H, 11, Result, GetHapticsStatus,     (sf::Out<ams::controller::HapticsStatus> out),                                          (out)                       ) \
     AMS_SF_METHOD_INFO(C, H, 12, Result, PlayHaptics,          (const ams::controller::HapticVoices &voices),                                          (voices)                    ) \
     AMS_SF_METHOD_INFO(C, H, 13, Result, StopHaptics,          (),                                                                                      ()                          ) \
+    AMS_SF_METHOD_INFO(C, H, 14, Result, GetControllerInput,   (sf::Out<ams::controller::ControllerInput> out),                                        (out)                       ) \
 
 AMS_SF_DEFINE_INTERFACE(ams::mc, IMissionControlInterface, AMS_MISSION_CONTROL_INTERFACE_INFO, 0x30eba3d4)
 
@@ -58,6 +59,7 @@ namespace ams::mc {
             Result GetHapticsStatus(sf::Out<ams::controller::HapticsStatus> out);
             Result PlayHaptics(const ams::controller::HapticVoices &voices);
             Result StopHaptics();
+            Result GetControllerInput(sf::Out<ams::controller::ControllerInput> out);
     };
     static_assert(IsIMissionControlInterface<MissionControlService>);
 

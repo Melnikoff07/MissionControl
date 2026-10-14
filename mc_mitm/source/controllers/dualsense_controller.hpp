@@ -198,6 +198,7 @@ namespace ams::controller {
             Result SetTriggerEffects(const DualsenseTriggerEffect &right, const DualsenseTriggerEffect &left);
             virtual Result SetTriggerEffectsOverride(const TriggerEffects *effects) override;
             virtual bool GetAnalogTriggers(AnalogTriggerState *out) const override;
+            virtual bool GetControllerInput(ControllerInput *out) const override;
             virtual Result SetLightbarOverride(const RGBColour *colour) override;
             virtual void TickHaptics() override;
             virtual void PlayHaptics(const HapticVoices *voices) override;

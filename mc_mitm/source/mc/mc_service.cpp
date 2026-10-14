@@ -143,6 +143,13 @@ namespace ams::mc {
         R_SUCCEED();
     }
 
+    Result MissionControlService::GetControllerInput(sf::Out<ams::controller::ControllerInput> out) {
+        ams::controller::ControllerInput input = {};
+        controller::GetControllerInput(&input);
+        out.SetValue(input);
+        R_SUCCEED();
+    }
+
     Result MissionControlService::GetHapticsStatus(sf::Out<ams::controller::HapticsStatus> out) {
         ams::controller::HapticsStatus status;
         controller::haptics::GetStatus(&status);

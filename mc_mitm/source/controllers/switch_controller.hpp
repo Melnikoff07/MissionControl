@@ -55,6 +55,7 @@ namespace ams::controller {
             // Adaptive trigger effects requested over IPC, nullptr restores the default. Ignored by controllers without adaptive triggers.
             virtual Result SetTriggerEffectsOverride(const TriggerEffects *effects) { AMS_UNUSED(effects); R_SUCCEED(); }
             virtual bool GetAnalogTriggers(AnalogTriggerState *out) const { AMS_UNUSED(out); return false; }
+            virtual bool GetControllerInput(ControllerInput *out) const { AMS_UNUSED(out); return false; }
             // Lightbar colour requested over IPC, nullptr restores the player colour. Ignored by controllers without a lightbar.
             virtual Result SetLightbarOverride(const RGBColour *colour) { AMS_UNUSED(colour); R_SUCCEED(); }
             virtual void PlayHaptics(const HapticVoices *voices) { AMS_UNUSED(voices); }

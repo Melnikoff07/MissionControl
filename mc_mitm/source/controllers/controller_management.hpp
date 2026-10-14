@@ -103,6 +103,7 @@ namespace ams::controller {
 
     // Analog trigger positions of the first connected controller that reports them
     bool GetAnalogTriggers(AnalogTriggerState *out);
+    bool GetControllerInput(ControllerInput *out);
 
     // Snapshot of the connected controllers
     std::vector<std::shared_ptr<SwitchController>> GetControllers();

@@ -408,6 +408,14 @@ namespace ams::controller {
         return true;
     }
 
+    bool DualsenseController::GetControllerInput(ControllerInput *out) const {
+        out->buttons       = m_buttons.Value();
+        out->left_trigger  = m_analog_left_trigger;
+        out->right_trigger = m_analog_right_trigger;
+        out->valid         = 1;
+        return true;
+    }
+
     void DualsenseController::TickHaptics() {
         if (!m_hd_haptics || !m_haptics_ready) {
             return;

@@ -56,6 +56,16 @@ namespace ams::controller {
         u32 voices;         // pattern voices received over mc command 12
     };
 
+    // Current input of the first controller that reports it (mc command 14): Switch button bits as in SwitchButton
+    // (Y = bit 0 ... L = bit 22, ZL = bit 23) and raw analog trigger positions
+    struct ControllerInput {
+        u32 buttons;
+        u8 left_trigger;
+        u8 right_trigger;
+        u8 valid;
+        u8 reserved;
+    };
+
     // One voice of a haptic pattern for the DualSense voice coils (mc command 12). A voice is a sine or low-passed noise
     // whose frequency sweeps from freq_start to freq_end, shaped by an attack / hold / decay envelope after a delay.
     // Patterns are built from several voices; they are mixed with the game's own rumble.
