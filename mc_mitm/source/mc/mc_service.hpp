@@ -32,6 +32,7 @@
     AMS_SF_METHOD_INFO(C, H, 8, Result, GetAnalogTriggers,     (sf::Out<ams::controller::AnalogTriggerState> out),                                     (out)                       ) \
     AMS_SF_METHOD_INFO(C, H, 9, Result, SetLightbarColour,     (const ams::controller::RGBColour &colour),                                             (colour)                    ) \
     AMS_SF_METHOD_INFO(C, H, 10, Result, ClearLightbarColour,  (),                                                                                      ()                          ) \
+    AMS_SF_METHOD_INFO(C, H, 11, Result, GetHapticsStatus,     (sf::Out<ams::controller::HapticsStatus> out),                                          (out)                       ) \
 
 AMS_SF_DEFINE_INTERFACE(ams::mc, IMissionControlInterface, AMS_MISSION_CONTROL_INTERFACE_INFO, 0x30eba3d4)
 
@@ -52,6 +53,7 @@ namespace ams::mc {
             Result GetAnalogTriggers(sf::Out<ams::controller::AnalogTriggerState> out);
             Result SetLightbarColour(const ams::controller::RGBColour &colour);
             Result ClearLightbarColour();
+            Result GetHapticsStatus(sf::Out<ams::controller::HapticsStatus> out);
     };
     static_assert(IsIMissionControlInterface<MissionControlService>);
 

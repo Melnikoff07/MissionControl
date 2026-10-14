@@ -42,6 +42,7 @@ namespace ams::mitm {
             bool dualsense_trigger_test_mode;
             bool dualsense_hd_haptics;
             int dualsense_haptics_gain;
+            bool dualsense_haptics_audio_init;
         } misc;
     };
 

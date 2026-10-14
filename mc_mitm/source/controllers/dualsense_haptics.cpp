@@ -26,6 +26,8 @@ namespace ams::controller::haptics {
         alignas(os::ThreadStackAlignment) constinit u8 g_thread_stack[ThreadStackSize];
         constinit os::ThreadType g_thread;
 
+        constinit HapticsStatus g_status = {};
+
         // 32 frames at 3000 Hz
         constexpr u64 ReportPeriodNs = 1'000'000'000ULL * FramesPerReport / SampleRate;
 
@@ -33,7 +35,9 @@ namespace ams::controller::haptics {
             const u64 period = armNsToTicks(ReportPeriodNs);
             u64 next = armGetSystemTick();
 
+            g_status.thread_running = 1;
             for (;;) {
+                ++g_status.ticks;
                 for (auto &controller : GetControllers()) {
                     controller->TickHaptics();
                 }
@@ -51,10 +55,24 @@ namespace ams::controller::haptics {
 
     }
 
+    void NoteReportResult(Result rc) {
+        if (R_SUCCEEDED(rc)) {
+            ++g_status.reports_sent;
+        } else {
+            ++g_status.reports_failed;
+            g_status.last_error = rc.GetValue();
+        }
+    }
+
+    void GetStatus(HapticsStatus *out) {
+        *out = g_status;
+    }
+
     Result Initialize() {
         if (!mitm::GetGlobalConfig()->misc.dualsense_hd_haptics) {
             R_SUCCEED();
         }
+        g_status.enabled = 1;
 
         R_TRY(os::CreateThread(&g_thread,
             HapticsThreadFunc,

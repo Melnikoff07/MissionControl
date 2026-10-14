@@ -175,6 +175,7 @@ namespace ams::controller {
             , m_lightbar_override_active(false)
             , m_player_colour({0, 0, 0})
             , m_hd_haptics(false)
+            , m_haptics_audio_init(false)
             , m_haptics_gain(1.0f)
             , m_haptics_motors({})
             , m_haptics_phase{}
@@ -233,6 +234,7 @@ namespace ams::controller {
 
             // HD haptics: the game's HD rumble synthesised as audio for the voice coils
             bool m_hd_haptics;
+            bool m_haptics_audio_init;
             float m_haptics_gain;
             os::SdkMutex m_haptics_lock;
             SwitchMotorData m_haptics_motors;   // latest decoded rumble, written by SetVibration

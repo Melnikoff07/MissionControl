@@ -37,6 +37,16 @@ namespace ams::controller {
         u8 reserved;
     };
 
+    // Diagnostics for HD haptics streaming (mc command 11)
+    struct HapticsStatus {
+        u32 enabled;        // dualsense_hd_haptics set in the config
+        u32 thread_running;
+        u32 ticks;          // haptics thread iterations
+        u32 reports_sent;   // 0x32 reports written successfully
+        u32 reports_failed;
+        u32 last_error;     // Result of the last failed write
+    };
+
     static_assert(sizeof(TriggerEffect) == 11);
     static_assert(sizeof(TriggerEffects) == 22);
 

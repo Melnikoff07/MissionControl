@@ -15,6 +15,7 @@
  */
 #pragma once
 #include <stratosphere.hpp>
+#include "trigger_effects.hpp"
 
 namespace ams::controller::haptics {
 
@@ -24,5 +25,10 @@ namespace ams::controller::haptics {
     constexpr u32 FramesPerReport = 32;
 
     Result Initialize();
+
+    // Called by controllers after writing a haptics report
+    void NoteReportResult(Result rc);
+
+    void GetStatus(HapticsStatus *out);
 
 }

@@ -238,6 +238,7 @@ namespace ams::controller {
         auto config = mitm::GetGlobalConfig();
         m_hd_haptics   = config->misc.dualsense_hd_haptics;
         m_haptics_gain = config->misc.dualsense_haptics_gain / 100.0f;
+        m_haptics_audio_init = m_hd_haptics && config->misc.dualsense_haptics_audio_init;
         if (m_hd_haptics) {
             m_haptics_chirp_reports = HapticsChirpReports;
         }
@@ -436,7 +437,7 @@ namespace ams::controller {
         u32 crc = crc32CalculateWithSeed(crc_seed, &report[1], HapticsReportSize - 1 - 4);
         std::memcpy(&report[HapticsReportSize - 4], &crc, sizeof(crc));
 
-        R_DISCARD(this->WriteDataReport(report, sizeof(report)));
+        haptics::NoteReportResult(this->WriteDataReport(report, sizeof(report)));
     }
 
     void DualsenseController::ParseInputReport(const u8 *report_buffer, size_t size) {
@@ -650,6 +651,19 @@ namespace ams::controller {
         report.output0x31.data[45] = m_lightbar_colour.r;
         report.output0x31.data[46] = m_lightbar_colour.g;
         report.output0x31.data[47] = m_lightbar_colour.b;
+
+        // Experimental: audio state as sent by awalol/dualsense-bt-haptics (taken from DSX) before streaming haptics.
+        // Meaning of some fields is unknown, the values are copied as they are.
+        if (m_haptics_audio_init) {
+            report.output0x31.data[1] |= 0xF0;  // headphone, speaker, mic volume and audio control valid
+            report.output0x31.data[2] |= 0xA3;  // mic mute LED, power save, audio control 2 valid (keeps lightbar/player LED/motor power bits)
+            report.output0x31.data[5]  = 0x7F;  // headphone volume
+            report.output0x31.data[6]  = 0x7F;  // speaker volume
+            report.output0x31.data[7]  = 0xFF;  // mic volume
+            report.output0x31.data[8]  = 0x09;  // audio control
+            report.output0x31.data[38] = 0x0A;
+            report.output0x31.data[39] |= 0x04;
+        }
         report.output0x31.crc = crc32CalculateWithSeed(CrcSeed, report.output0x31.data, sizeof(report.output0x31.data));
 
         Result rc = this->WriteDataReport(&report, sizeof(report.output0x31) + sizeof(report.id));

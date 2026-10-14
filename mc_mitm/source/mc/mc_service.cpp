@@ -18,6 +18,7 @@
 #include "../bluetooth_mitm/btdrv_ext.h"
 #include "../bluetooth_mitm/bluetooth/bluetooth_core.hpp"
 #include "../controllers/controller_management.hpp"
+#include "../controllers/dualsense_haptics.hpp"
 
 namespace ams::mc {
 
@@ -122,6 +123,13 @@ namespace ams::mc {
     Result MissionControlService::ClearLightbarColour() {
         g_lightbar_owner = nullptr;
         controller::SetLightbarOverride(nullptr);
+        R_SUCCEED();
+    }
+
+    Result MissionControlService::GetHapticsStatus(sf::Out<ams::controller::HapticsStatus> out) {
+        ams::controller::HapticsStatus status;
+        controller::haptics::GetStatus(&status);
+        out.SetValue(status);
         R_SUCCEED();
     }
 
