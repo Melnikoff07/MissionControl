@@ -70,7 +70,7 @@ namespace ams::controller {
     // whose frequency sweeps from freq_start to freq_end, shaped by an attack / hold / decay envelope after a delay.
     // Patterns are built from several voices; they are mixed with the game's own rumble.
     struct HapticVoice {
-        u8  slot;           // 0-7: a voice replaces the one playing in its slot; amplitude 0 on both sides stops the slot
+        u8  slot;           // 0-11: a voice replaces the one playing in its slot; amplitude 0 on both sides stops the slot
         u8  flags;          // HapticVoiceFlag_*
         u8  amp_left;       // 0-255
         u8  amp_right;
@@ -87,7 +87,7 @@ namespace ams::controller {
         HapticVoiceFlag_Loop  = 0x02,
     };
 
-    constexpr u32 HapticVoiceSlots = 8;
+    constexpr u32 HapticVoiceSlots = 12;
 
     struct HapticVoices {
         HapticVoice voices[4];
