@@ -564,8 +564,17 @@ namespace ams::controller {
     }
 
     void DualsenseController::ParseInputReport(const u8 *report_buffer, size_t size) {
-        AMS_UNUSED(size);
         auto report = reinterpret_cast<const DualsenseReportData *>(report_buffer);
+
+        if (m_packet_output) {
+            // With the audio path armed, a 0x31 report flagged with bit 1 of its second byte carries microphone audio
+            // instead of the controller state (as handled by DS5Dongle); it must not be read as buttons and sticks
+            bool mic = report->id == 0x31 && size > 1 && (report_buffer[1] & 0x02);
+            haptics::NoteInputReport(report_buffer, size, mic);
+            if (mic) {
+                return;
+            }
+        }
 
         switch(report->id) {
             case 0x01:
@@ -806,11 +815,12 @@ namespace ams::controller {
         state[46] = m_lightbar_colour.b;
 
         if (send_audio) {
-            // Arm the audio path once per connection like DS5Dongle: audio control (internal mic, noise cancelling)
-            // and the mute/power save block with everything on, haptics included
+            // Arm the audio path once per connection like DS5Dongle: audio control (microphone disabled, so the
+            // controller has no reason to send mic audio in place of input reports) and the mute/power save block
+            // with everything on, haptics included
             state[0] |= 0x80;   // audio control valid
             state[1] |= 0x02;   // mute control valid
-            state[7]  = 0x09;   // audio control
+            state[7]  = 0x03;   // audio control: mic select 3 (disabled in DS5Dongle's config)
             state[9]  = 0x00;   // no power save, nothing muted
         }
         report.output0x31.crc = crc32CalculateWithSeed(CrcSeed, report.output0x31.data, sizeof(report.output0x31.data));

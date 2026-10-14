@@ -48,6 +48,10 @@ namespace ams::controller {
         u32 prime_failed;   // feature reads 0x09/0x22 at connect that failed (bit 0 = 0x09, bit 1 = 0x22), last controller
         u32 chirps;         // startup test buzzes started (one per connected controller)
         u32 fallbacks;      // controllers that gave up on HD haptics after write failures
+        u32 input_reports;  // 0x31 input reports from DualSense controllers in haptics mode
+        u32 input_mic;      // of those, reports flagged as microphone audio (skipped)
+        u32 input_other;    // input reports with other ids
+        u8  last_input[8];  // first bytes of the last 0x31 input report
     };
 
     static_assert(sizeof(TriggerEffect) == 11);

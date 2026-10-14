@@ -76,6 +76,18 @@ namespace ams::controller::haptics {
         ++g_status.fallbacks;
     }
 
+    void NoteInputReport(const u8 *report, size_t size, bool mic) {
+        if (report[0] != 0x31) {
+            ++g_status.input_other;
+            return;
+        }
+        ++g_status.input_reports;
+        if (mic) {
+            ++g_status.input_mic;
+        }
+        std::memcpy(g_status.last_input, report, std::min(size, sizeof(g_status.last_input)));
+    }
+
     void GetStatus(HapticsStatus *out) {
         *out = g_status;
     }
