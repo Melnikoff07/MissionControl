@@ -15,6 +15,7 @@
  */
 #include "dualsense_controller.hpp"
 #include "../mcmitm_config.hpp"
+#include "../async/async.hpp"
 #include <stratosphere.hpp>
 
 namespace ams::controller {
@@ -82,6 +83,127 @@ namespace ams::controller {
 
         constexpr u32 CrcSeed = 0x8C36CCAE; // CRC32 of {0xa2, 0x31} bytes at beginning of output report
 
+        // Output report valid_flag0 bits that tell the controller to apply the trigger effect blocks
+        constexpr u8 FlagRightTriggerEffect = 0x04;
+        constexpr u8 FlagLeftTriggerEffect  = 0x08;
+
+        // Adaptive trigger effect modes. Byte layouts follow community reverse engineering of the
+        // DualSense (Nielk1's TriggerEffectGenerator, used by DSX). Zoned modes split the trigger
+        // travel into 10 zones (0-9) and take strengths/amplitudes in the range 1-8.
+        constexpr u8 TriggerEffectModeSimpleFeedback  = 0x01;
+        constexpr u8 TriggerEffectModeSimpleWeapon    = 0x02;
+        constexpr u8 TriggerEffectModeOff             = 0x05;
+        constexpr u8 TriggerEffectModeSimpleVibration = 0x06;
+        constexpr u8 TriggerEffectModeFeedback        = 0x21;
+        constexpr u8 TriggerEffectModeBow             = 0x22;
+        constexpr u8 TriggerEffectModeWeapon          = 0x25;
+        constexpr u8 TriggerEffectModeVibration       = 0x26;
+
+        constexpr void PutU16(u8 *dst, u16 value) {
+            dst[0] = value & 0xFF;
+            dst[1] = value >> 8;
+        }
+
+        constexpr void PutU32(u8 *dst, u32 value) {
+            for (int i = 0; i < 4; ++i) {
+                dst[i] = (value >> (8 * i)) & 0xFF;
+            }
+        }
+
+        constexpr DualsenseTriggerEffect TriggerEffectOff() {
+            return { TriggerEffectModeOff, {} };
+        }
+
+        // Constant resistance from start position (0-255) to the end of travel
+        constexpr DualsenseTriggerEffect SimpleFeedback(u8 start, u8 force) {
+            return { TriggerEffectModeSimpleFeedback, { start, force } };
+        }
+
+        // Resistance between start and end positions (0-255)
+        constexpr DualsenseTriggerEffect SimpleWeapon(u8 start, u8 end, u8 force) {
+            return { TriggerEffectModeSimpleWeapon, { start, end, force } };
+        }
+
+        // Vibration from start position (0-255) to the end of travel
+        constexpr DualsenseTriggerEffect SimpleVibration(u8 frequency, u8 amplitude, u8 start) {
+            return { TriggerEffectModeSimpleVibration, { frequency, amplitude, start } };
+        }
+
+        // Resistance per zone, strengths[i] in 0-8 where 0 means no resistance in that zone
+        constexpr DualsenseTriggerEffect Feedback(const u8 (&strengths)[10]) {
+            u16 active_zones = 0;
+            u32 zone_strengths = 0;
+            for (int i = 0; i < 10; ++i) {
+                if (strengths[i] > 0) {
+                    active_zones |= 1 << i;
+                    zone_strengths |= static_cast<u32>((strengths[i] - 1) & 0x07) << (3 * i);
+                }
+            }
+
+            DualsenseTriggerEffect effect = { TriggerEffectModeFeedback, {} };
+            PutU16(&effect.params[0], active_zones);
+            PutU32(&effect.params[2], zone_strengths);
+            return effect;
+        }
+
+        // Resistance from start zone (0-8) to end zone (start+1 - 8), then snaps back with snap_force (1-8)
+        constexpr DualsenseTriggerEffect Bow(u8 start, u8 end, u8 strength, u8 snap_force) {
+            DualsenseTriggerEffect effect = { TriggerEffectModeBow, {} };
+            PutU16(&effect.params[0], (1 << start) | (1 << end));
+            PutU16(&effect.params[2], ((strength - 1) & 0x07) | (((snap_force - 1) & 0x07) << 3));
+            return effect;
+        }
+
+        // Resistance from start zone (2-7) that gives way at end zone (start+1 - 8), like a gun trigger breaking
+        constexpr DualsenseTriggerEffect Weapon(u8 start, u8 end, u8 strength) {
+            DualsenseTriggerEffect effect = { TriggerEffectModeWeapon, {} };
+            PutU16(&effect.params[0], (1 << start) | (1 << end));
+            effect.params[2] = (strength - 1) & 0x07;
+            return effect;
+        }
+
+        // Vibration from start zone (0-9) to the end of travel, amplitude 1-8, frequency in Hz
+        constexpr DualsenseTriggerEffect Vibration(u8 start, u8 amplitude, u8 frequency) {
+            u16 active_zones = 0;
+            u32 zone_amplitudes = 0;
+            for (int i = start; i < 10; ++i) {
+                active_zones |= 1 << i;
+                zone_amplitudes |= static_cast<u32>((amplitude - 1) & 0x07) << (3 * i);
+            }
+
+            DualsenseTriggerEffect effect = { TriggerEffectModeVibration, {} };
+            PutU16(&effect.params[0], active_zones);
+            PutU32(&effect.params[2], zone_amplitudes);
+            effect.params[8] = frequency;
+            return effect;
+        }
+
+        struct TriggerTestPreset {
+            RGBColour colour;
+            DualsenseTriggerEffect right;
+            DualsenseTriggerEffect left;
+        };
+
+        // Presets for trigger test mode (dualsense_trigger_test_mode). Preset 0 is "off", these are 1-7.
+        constexpr TriggerTestPreset TriggerTestPresets[] = {
+            // 1 red: constant resistance from ~25% travel (the mode MissionControl already uses for trigger travel)
+            { {0x40, 0x00, 0x00}, SimpleFeedback(0x40, 0xFF), SimpleFeedback(0x40, 0xFF) },
+            // 2 orange: R2 resistance rising along the travel (bow draw), L2 even medium resistance (shield)
+            { {0x40, 0x14, 0x00}, Feedback({0, 1, 2, 3, 4, 5, 6, 7, 8, 8}), Feedback({0, 0, 4, 4, 4, 4, 4, 4, 4, 4}) },
+            // 3 yellow: resistance that gives way with a click (parry)
+            { {0x30, 0x30, 0x00}, Weapon(2, 6, 8), Weapon(3, 5, 8) },
+            // 4 green: bow, resistance that snaps back at the end
+            { {0x00, 0x40, 0x00}, Bow(1, 7, 6, 8), Bow(1, 4, 3, 8) },
+            // 5 cyan: zoned vibration, R2 strong and fast, L2 weak and slow (weapon about to break)
+            { {0x00, 0x30, 0x30}, Vibration(0, 8, 40), Vibration(0, 4, 15) },
+            // 6 blue: simple vibration
+            { {0x00, 0x00, 0x40}, SimpleVibration(30, 0xFF, 0x00), SimpleVibration(10, 0xFF, 0x00) },
+            // 7 purple: simple resistance section in the middle of the travel
+            { {0x30, 0x00, 0x30}, SimpleWeapon(0x50, 0xA0, 0xFF), SimpleWeapon(0x50, 0xA0, 0xFF) },
+        };
+
+        constexpr u8 TriggerTestPresetCount = std::size(TriggerTestPresets);
+
     }
 
     Result DualsenseController::Initialize() {
@@ -100,10 +222,22 @@ namespace ams::controller {
         auto config = mitm::GetGlobalConfig();
         m_lightbar_brightness = config->misc.dualsense_lightbar_brightness;
         m_rumble_intensity    = 0x08 - config->misc.dualsense_vibration_intensity; // User setting is inverse of how the controller sets intensity
+        m_base_trigger_effect = TriggerEffectOff();
         if (config->misc.dualsense_adaptive_trigger_travel > 0) {
             m_feature_flags0 = 0x0F;
-            m_adaptive_trigger_travel = static_cast<u8>(UINT8_MAX * config->misc.dualsense_adaptive_trigger_travel / 100.0f);
-            m_trigger_threshold       = (config->misc.analog_trigger_activation_threshold / 100.0f) * (config->misc.dualsense_adaptive_trigger_travel / 100.0f);
+            m_base_trigger_effect = SimpleFeedback(static_cast<u8>(UINT8_MAX * config->misc.dualsense_adaptive_trigger_travel / 100.0f), 0xFF);
+            m_trigger_effects_always_send = true;
+            m_trigger_threshold = (config->misc.analog_trigger_activation_threshold / 100.0f) * (config->misc.dualsense_adaptive_trigger_travel / 100.0f);
+        }
+        m_trigger_effect_right = m_base_trigger_effect;
+        m_trigger_effect_left  = m_base_trigger_effect;
+
+        // In test mode trigger effects are only sent when they change, the controller keeps the last one
+        m_trigger_test_mode = config->misc.dualsense_trigger_test_mode;
+        if (m_trigger_test_mode) {
+            m_feature_flags0 = 0x03;
+            m_trigger_effects_always_send = false;
+            m_trigger_effects_dirty = true;
         }
 
         R_SUCCEED();
@@ -148,6 +282,13 @@ namespace ams::controller {
 
     Result DualsenseController::SetLightbarColour(RGBColour colour) {
         m_lightbar_colour = colour;
+        R_RETURN(this->PushRumbleLedState());
+    }
+
+    Result DualsenseController::SetTriggerEffects(const DualsenseTriggerEffect &right, const DualsenseTriggerEffect &left) {
+        m_trigger_effect_right = right;
+        m_trigger_effect_left  = left;
+        m_trigger_effects_dirty = true;
         R_RETURN(this->PushRumbleLedState());
     }
 
@@ -256,6 +397,10 @@ namespace ams::controller {
         }
         m_buttons = button_state;
 
+        if (m_trigger_test_mode) {
+            this->HandleTriggerTestCombo(src->input0x31.buttons);
+        }
+
         utils::Vec3d<float> accel = {
             .x = -src->input0x31.acc_z / float(m_motion_calibration.acc.z_max),
             .y = -src->input0x31.acc_x / float(m_motion_calibration.acc.x_max),
@@ -269,6 +414,49 @@ namespace ams::controller {
         };
 
         m_sixaxis_processor.Update(accel, gyro);
+    }
+
+    void DualsenseController::HandleTriggerTestCombo(const DualsenseButtonData &buttons) {
+        // Act only on the moment a D-pad direction is pressed while L3+R3 are held
+        u8 dpad = buttons.dpad;
+        bool dpad_changed = dpad != m_trigger_test_prev_dpad;
+        m_trigger_test_prev_dpad = dpad;
+        if (!dpad_changed || !(buttons.L3 && buttons.R3)) {
+            return;
+        }
+
+        u8 preset = m_trigger_test_preset;
+        switch (dpad) {
+            case 2: // Right: next preset
+                preset = (preset + 1) % (TriggerTestPresetCount + 1); break;
+            case 6: // Left: previous preset
+                preset = (preset + TriggerTestPresetCount) % (TriggerTestPresetCount + 1); break;
+            case 4: // Down: effects off
+                preset = 0; break;
+            default:
+                return;
+        }
+
+        if (preset == m_trigger_test_preset) {
+            return;
+        }
+
+        if (m_trigger_test_preset == 0) {
+            m_trigger_test_saved_colour = m_lightbar_colour;
+        }
+        m_trigger_test_preset = preset;
+
+        // Don't write to the controller from the input report handler, hand it to the async worker
+        async::QueueWork(new async::AsyncFunction([this, preset]() -> ams::Result {
+            if (preset == 0) {
+                m_lightbar_colour = m_trigger_test_saved_colour;
+                R_RETURN(this->SetTriggerEffects(m_base_trigger_effect, m_base_trigger_effect));
+            }
+
+            const TriggerTestPreset &p = TriggerTestPresets[preset - 1];
+            m_lightbar_colour = p.colour;
+            R_RETURN(this->SetTriggerEffects(p.right, p.left));
+        }));
     }
 
     Result DualsenseController::GetVersionInfo(DualsenseVersionInfo *version_info) {
@@ -292,19 +480,17 @@ namespace ams::controller {
     }
 
     Result DualsenseController::PushRumbleLedState() {
+        bool send_trigger_effects = m_trigger_effects_always_send || m_trigger_effects_dirty.exchange(false);
+
         DualsenseReportData report = {};
         report.id = 0x31;
         report.output0x31.data[0]  = 0x02;
-        report.output0x31.data[1]  = m_feature_flags0;
+        report.output0x31.data[1]  = m_feature_flags0 | (send_trigger_effects ? (FlagRightTriggerEffect | FlagLeftTriggerEffect) : 0);
         report.output0x31.data[2]  = m_feature_flags1;
         report.output0x31.data[3]  = m_rumble_state.amp_motor_right;
         report.output0x31.data[4]  = m_rumble_state.amp_motor_left;
-        report.output0x31.data[11] = 0x01;
-        report.output0x31.data[12] = m_adaptive_trigger_travel;
-        report.output0x31.data[13] = 0xFF;
-        report.output0x31.data[22] = 0x01;
-        report.output0x31.data[23] = m_adaptive_trigger_travel;
-        report.output0x31.data[24] = 0xFF;
+        std::memcpy(&report.output0x31.data[11], &m_trigger_effect_right, sizeof(DualsenseTriggerEffect));
+        std::memcpy(&report.output0x31.data[22], &m_trigger_effect_left,  sizeof(DualsenseTriggerEffect));
         report.output0x31.data[37] = m_rumble_intensity;
         report.output0x31.data[39] = 0x02 | 0x01;
         report.output0x31.data[42] = 0x02;
@@ -315,7 +501,13 @@ namespace ams::controller {
         report.output0x31.data[47] = m_lightbar_colour.b;
         report.output0x31.crc = crc32CalculateWithSeed(CrcSeed, report.output0x31.data, sizeof(report.output0x31.data));
 
-        R_RETURN(this->WriteDataReport(&report, sizeof(report.output0x31) + sizeof(report.id)));
+        Result rc = this->WriteDataReport(&report, sizeof(report.output0x31) + sizeof(report.id));
+        if (R_FAILED(rc) && send_trigger_effects) {
+            // Effects didn't reach the controller, retry them with the next report
+            m_trigger_effects_dirty = true;
+        }
+
+        R_RETURN(rc);
     }
 
 }

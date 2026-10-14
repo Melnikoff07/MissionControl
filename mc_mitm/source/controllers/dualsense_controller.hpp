@@ -15,6 +15,7 @@
  */
 #pragma once
 #include "emulated_switch_controller.hpp"
+#include <atomic>
 
 namespace ams::controller {
 
@@ -40,6 +41,12 @@ namespace ams::controller {
         u8          : 0;
 
         u8 unk;
+    } PACKED;
+
+    // One trigger's adaptive effect block inside output report 0x31 (11 bytes: mode + 10 parameters)
+    struct DualsenseTriggerEffect {
+        u8 mode;
+        u8 params[10];
     } PACKED;
 
     struct DualsenseRumbleData {
@@ -157,13 +164,23 @@ namespace ams::controller {
             , m_led_flags(0)
             , m_lightbar_colour({0, 0, 0})
             , m_lightbar_brightness(0)
-            , m_rumble_state({0, 0}) { }
+            , m_rumble_state({0, 0})
+            , m_trigger_effect_right({})
+            , m_trigger_effect_left({})
+            , m_base_trigger_effect({})
+            , m_trigger_effects_always_send(false)
+            , m_trigger_effects_dirty(false)
+            , m_trigger_test_mode(false)
+            , m_trigger_test_preset(0)
+            , m_trigger_test_prev_dpad(0x08)
+            , m_trigger_test_saved_colour({0, 0, 0}) { }
 
             virtual Result Initialize() override;
             virtual Result SetVibration(const SwitchMotorData *motor_data) override;
             virtual Result CancelVibration() override;
             virtual Result SetPlayerLed(SwitchPlayerNumber player_number) override;
             Result SetLightbarColour(RGBColour colour);
+            Result SetTriggerEffects(const DualsenseTriggerEffect &right, const DualsenseTriggerEffect &left);
 
             virtual void ParseInputReport(const u8 *report_buffer, size_t size) override;
 
@@ -174,6 +191,7 @@ namespace ams::controller {
             Result GetVersionInfo(DualsenseVersionInfo *version_info);
             Result GetCalibrationData(DualsenseImuCalibrationData *calibration);
             Result PushRumbleLedState();
+            void HandleTriggerTestCombo(const DualsenseButtonData &buttons);
 
             u8 m_feature_flags0;
             u8 m_feature_flags1;
@@ -181,9 +199,19 @@ namespace ams::controller {
             RGBColour m_lightbar_colour;
             u8 m_lightbar_brightness;
             u8 m_rumble_intensity;
-            u8 m_adaptive_trigger_travel;
 
             DualsenseRumbleData m_rumble_state;
+
+            DualsenseTriggerEffect m_trigger_effect_right;
+            DualsenseTriggerEffect m_trigger_effect_left;
+            DualsenseTriggerEffect m_base_trigger_effect;   // Effect from config (trigger travel limit), restored when test mode is off
+            bool m_trigger_effects_always_send;             // Original behaviour: resend trigger effects with every output report
+            std::atomic<bool> m_trigger_effects_dirty;      // Trigger effects changed and must be sent with the next output report
+
+            bool m_trigger_test_mode;
+            u8 m_trigger_test_preset;
+            u8 m_trigger_test_prev_dpad;
+            RGBColour m_trigger_test_saved_colour;
 
             DualsenseVersionInfo m_version_info;
             DualsenseImuCalibrationData m_motion_calibration;

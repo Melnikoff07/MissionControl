@@ -39,6 +39,7 @@ namespace ams::mitm {
             bool dualsense_enable_player_leds;
             int dualsense_vibration_intensity;
             int dualsense_adaptive_trigger_travel;
+            bool dualsense_trigger_test_mode;
         } misc;
     };
 
