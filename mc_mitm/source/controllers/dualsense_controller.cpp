@@ -96,7 +96,13 @@ namespace ams::controller {
         constexpr size_t HapticsReportSize   = 142;
         constexpr size_t HapticsSamplesStart = 13;
         constexpr u32 HapticsSilentReportsBeforeStop = 10; // keep sending silence ~100 ms, then stop
-        constexpr u32 HapticsChirpReports = 30;            // ~320 ms test sweep after connecting
+        constexpr u32 HapticsChirpReports = 48;            // ~0.5 s test sweep after connecting
+        constexpr u32 HapticsMaxFailures = 3;              // failed 0x32 writes before falling back to the simplified rumble
+        constexpr u64 HapticsPauseNs = 1'000'000'000;      // pause after a failed write, lets the Bluetooth link drain
+
+        // Output report valid_flag0 bits that switch the controller to rumble emulation. While they are set the voice
+        // coils play the motor values and ignore the 0x32 audio stream, so they stay clear in HD haptics mode.
+        constexpr u8 FlagsRumbleEmulation = 0x01 | 0x02;
         constexpr float TwoPi = 6.28318530718f;
 
         // Output report valid_flag0 bits that tell the controller to apply the trigger effect blocks
@@ -223,30 +229,46 @@ namespace ams::controller {
     }
 
     Result DualsenseController::Initialize() {
+        auto config = mitm::GetGlobalConfig();
+
+        // HD haptics: the controller must never see the rumble emulation flags, not even in the first report,
+        // and its audio path is armed the way DS5Dongle (a working Bluetooth haptics host) does it
+        const bool hd_haptics = config->misc.dualsense_hd_haptics;
+        m_hd_haptics    = hd_haptics;
+        m_packet_output = hd_haptics;
+        m_haptics_audio_pending = hd_haptics;
+        m_haptics_gain  = config->misc.dualsense_haptics_gain / 100.0f;
+        const u8 rumble_flags = hd_haptics ? 0x00 : FlagsRumbleEmulation;
+
+        m_feature_flags0 = rumble_flags;
+        m_feature_flags1 = 0x54;
+        m_rumble_intensity = 0x08 - config->misc.dualsense_vibration_intensity; // User setting is inverse of how the controller sets intensity
+
         R_TRY(this->PushRumbleLedState());
         R_TRY(EmulatedSwitchController::Initialize());
+
+        // Same feature read order as DS5Dongle: 0x09, 0x20, 0x22, 0x05. On the DualSense a feature read can switch
+        // modes (0x05 enables the full input report), and 0x09/0x22 are the reads MissionControl never did.
+        u32 prime_failed = 0;
+        bluetooth::HidReport feature;
+        if (m_hd_haptics && R_FAILED(this->GetReport(0x09, BtdrvBluetoothHhReportType_Feature, &feature))) {
+            prime_failed |= 1;
+        }
 
         // Request controller firmware version info
         R_TRY(this->GetVersionInfo(&m_version_info));
 
+        if (m_hd_haptics && R_FAILED(this->GetReport(0x22, BtdrvBluetoothHhReportType_Feature, &feature))) {
+            prime_failed |= 2;
+        }
+
         // Request motion calibration data from DualSense
         R_TRY(this->GetCalibrationData(&m_motion_calibration));
 
-        m_feature_flags0 = 0x03;
-        m_feature_flags1 = 0x54;
-
-        auto config = mitm::GetGlobalConfig();
-        m_hd_haptics   = config->misc.dualsense_hd_haptics;
-        m_haptics_gain = config->misc.dualsense_haptics_gain / 100.0f;
-        m_haptics_audio_init = m_hd_haptics && config->misc.dualsense_haptics_audio_init;
-        if (m_hd_haptics) {
-            m_haptics_chirp_reports = HapticsChirpReports;
-        }
         m_lightbar_brightness = config->misc.dualsense_lightbar_brightness;
-        m_rumble_intensity    = 0x08 - config->misc.dualsense_vibration_intensity; // User setting is inverse of how the controller sets intensity
         m_base_trigger_effect = TriggerEffectOff();
         if (config->misc.dualsense_adaptive_trigger_travel > 0) {
-            m_feature_flags0 = 0x0F;
+            m_feature_flags0 = rumble_flags | FlagRightTriggerEffect | FlagLeftTriggerEffect;
             m_base_trigger_effect = SimpleFeedback(static_cast<u8>(UINT8_MAX * config->misc.dualsense_adaptive_trigger_travel / 100.0f), 0xFF);
             m_trigger_effects_always_send = true;
             m_trigger_threshold = (config->misc.analog_trigger_activation_threshold / 100.0f) * (config->misc.dualsense_adaptive_trigger_travel / 100.0f);
@@ -257,7 +279,7 @@ namespace ams::controller {
         // In test mode trigger effects are only sent when they change, the controller keeps the last one
         m_trigger_test_mode = config->misc.dualsense_trigger_test_mode;
         if (m_trigger_test_mode) {
-            m_feature_flags0 = 0x03;
+            m_feature_flags0 = rumble_flags;
             m_trigger_effects_always_send = false;
             m_trigger_effects_dirty = true;
         }
@@ -270,6 +292,17 @@ namespace ams::controller {
         RGBColour colour;
         if (GetLightbarOverride(&colour)) {
             R_TRY(this->SetLightbarOverride(&colour));
+        }
+
+        if (m_hd_haptics) {
+            // Arm the audio path again now that the feature reads are done, the order DS5Dongle uses
+            m_haptics_audio_pending = true;
+            R_DISCARD(this->PushRumbleLedState());
+
+            haptics::NotePrimeResult(prime_failed);
+            haptics::NoteChirp();
+            m_haptics_chirp_reports = HapticsChirpReports;
+            m_haptics_ready = true;
         }
 
         R_SUCCEED();
@@ -370,8 +403,14 @@ namespace ams::controller {
     }
 
     void DualsenseController::TickHaptics() {
-        if (!m_hd_haptics) {
+        if (!m_hd_haptics || !m_haptics_ready) {
             return;
+        }
+        if (m_haptics_resume_tick != 0) {
+            if (armGetSystemTick() < m_haptics_resume_tick) {
+                return;
+            }
+            m_haptics_resume_tick = 0;
         }
 
         SwitchMotorData motors;
@@ -384,7 +423,7 @@ namespace ams::controller {
         if (m_haptics_chirp_reports > 0) {
             float progress = 1.0f - float(m_haptics_chirp_reports) / HapticsChirpReports;
             float freq = 100.0f + 200.0f * progress;
-            motors.left_motor  = { .low_band_amp = 0.5f, .low_band_freq = freq, .high_band_amp = 0.0f, .high_band_freq = 320.0f };
+            motors.left_motor  = { .low_band_amp = 0.8f, .low_band_freq = freq, .high_band_amp = 0.0f, .high_band_freq = 320.0f };
             motors.right_motor = motors.left_motor;
             --m_haptics_chirp_reports;
         }
@@ -402,7 +441,6 @@ namespace ams::controller {
 
         u8 report[HapticsReportSize] = {};
         report[0]  = 0x32;
-        report[1]  = m_haptics_seq << 4;
         report[2]  = 0x91;  // packet 0x11, sized
         report[3]  = 7;
         report[4]  = 0xFE;
@@ -410,7 +448,6 @@ namespace ams::controller {
         report[10] = m_haptics_counter++;
         report[11] = 0x92;  // packet 0x12, sized
         report[12] = haptics::FramesPerReport * 2;
-        m_haptics_seq = (m_haptics_seq + 1) & 0x0F;
 
         // Two bands per coil, phase continuous across reports
         const SwitchVibrationValues *coil[2] = { &motors.left_motor, &motors.right_motor };
@@ -434,10 +471,38 @@ namespace ams::controller {
             const u8 header[2] = { 0xA2, 0x32 };
             return crc32Calculate(header, sizeof(header));
         }();
-        u32 crc = crc32CalculateWithSeed(crc_seed, &report[1], HapticsReportSize - 1 - 4);
-        std::memcpy(&report[HapticsReportSize - 4], &crc, sizeof(crc));
+        Result rc;
+        {
+            std::scoped_lock lk(m_output_lock);
+            report[1] = m_output_seq << 4;
+            m_output_seq = (m_output_seq + 1) & 0x0F;
 
-        haptics::NoteReportResult(this->WriteDataReport(report, sizeof(report)));
+            u32 crc = crc32CalculateWithSeed(crc_seed, &report[1], HapticsReportSize - 1 - 4);
+            std::memcpy(&report[HapticsReportSize - 4], &crc, sizeof(crc));
+            rc = this->WriteDataReport(report, sizeof(report));
+        }
+
+        haptics::NoteReportResult(rc);
+        if (R_FAILED(rc)) {
+            this->HandleHapticsWriteFailure(rc);
+        }
+    }
+
+    void DualsenseController::HandleHapticsWriteFailure(Result rc) {
+        AMS_UNUSED(rc);
+
+        // Last time failing writes ended with a stuck controller and a frozen console, so back off right away
+        if (++m_haptics_failures < HapticsMaxFailures) {
+            m_haptics_resume_tick = armGetSystemTick() + armNsToTicks(HapticsPauseNs);
+            return;
+        }
+
+        // Give up on HD haptics until the controller reconnects. Rumble emulation also parks the voice coils,
+        // so a half played haptics buffer can't keep buzzing.
+        m_hd_haptics = false;
+        m_feature_flags0 |= FlagsRumbleEmulation;
+        haptics::NoteFallback();
+        R_DISCARD(this->PushRumbleLedState());
     }
 
     void DualsenseController::ParseInputReport(const u8 *report_buffer, size_t size) {
@@ -645,44 +710,62 @@ namespace ams::controller {
     }
 
     Result DualsenseController::PushRumbleLedState() {
+        std::scoped_lock lk(m_output_lock);
+
         bool send_trigger_effects = m_trigger_effects_always_send || m_trigger_effects_dirty.exchange(false);
+        bool send_audio = m_haptics_audio_pending.exchange(false);
 
         DualsenseReportData report = {};
         report.id = 0x31;
-        report.output0x31.data[0]  = 0x02;
-        report.output0x31.data[1]  = m_feature_flags0 | (send_trigger_effects ? (FlagRightTriggerEffect | FlagLeftTriggerEffect) : 0);
-        report.output0x31.data[2]  = m_feature_flags1;
-        report.output0x31.data[3]  = m_rumble_state.amp_motor_right;
-        report.output0x31.data[4]  = m_rumble_state.amp_motor_left;
-        std::memcpy(&report.output0x31.data[11], &m_trigger_effect_right, sizeof(DualsenseTriggerEffect));
-        std::memcpy(&report.output0x31.data[22], &m_trigger_effect_left,  sizeof(DualsenseTriggerEffect));
-        report.output0x31.data[37] = m_rumble_intensity;
-        report.output0x31.data[39] = 0x02 | 0x01;
-        report.output0x31.data[42] = 0x02;
-        report.output0x31.data[43] = 0x02;
-        report.output0x31.data[44] = m_led_flags;
-        report.output0x31.data[45] = m_lightbar_colour.r;
-        report.output0x31.data[46] = m_lightbar_colour.g;
-        report.output0x31.data[47] = m_lightbar_colour.b;
 
-        // Experimental: audio state as sent by awalol/dualsense-bt-haptics (taken from DSX) before streaming haptics.
-        // Meaning of some fields is unknown, the values are copied as they are.
-        if (m_haptics_audio_init) {
-            report.output0x31.data[1] |= 0xF0;  // headphone, speaker, mic volume and audio control valid
-            report.output0x31.data[2] |= 0xA3;  // mic mute LED, power save, audio control 2 valid (keeps lightbar/player LED/motor power bits)
-            report.output0x31.data[5]  = 0x7F;  // headphone volume
-            report.output0x31.data[6]  = 0x7F;  // speaker volume
-            report.output0x31.data[7]  = 0xFF;  // mic volume
-            report.output0x31.data[8]  = 0x09;  // audio control
-            report.output0x31.data[38] = 0x0A;
-            report.output0x31.data[39] |= 0x04;
+        // The set state block (47 bytes, same layout as the USB output report 0x02) follows a short header
+        u8 *state;
+        if (m_packet_output) {
+            // Sequenced packet format of the Linux driver and DS5Dongle: seq << 4, then packet 0x10 (set state).
+            // The sequence number is shared with the 0x32 haptics reports.
+            report.output0x31.data[0] = m_output_seq << 4;
+            report.output0x31.data[1] = 0x10;
+            m_output_seq = (m_output_seq + 1) & 0x0F;
+            state = &report.output0x31.data[2];
+        } else {
+            report.output0x31.data[0] = 0x02;
+            state = &report.output0x31.data[1];
+        }
+
+        state[0]  = m_feature_flags0 | (send_trigger_effects ? (FlagRightTriggerEffect | FlagLeftTriggerEffect) : 0);
+        state[1]  = m_feature_flags1;
+        state[2]  = m_rumble_state.amp_motor_right;
+        state[3]  = m_rumble_state.amp_motor_left;
+        std::memcpy(&state[10], &m_trigger_effect_right, sizeof(DualsenseTriggerEffect));
+        std::memcpy(&state[21], &m_trigger_effect_left,  sizeof(DualsenseTriggerEffect));
+        state[36] = m_hd_haptics ? 0x00 : m_rumble_intensity;   // motor power reduction, haptics strength comes from the gain
+        state[38] = 0x02 | 0x01;
+        state[41] = 0x02;
+        state[42] = 0x02;
+        state[43] = m_led_flags;
+        state[44] = m_lightbar_colour.r;
+        state[45] = m_lightbar_colour.g;
+        state[46] = m_lightbar_colour.b;
+
+        if (send_audio) {
+            // Arm the audio path once per connection like DS5Dongle: audio control (internal mic, noise cancelling)
+            // and the mute/power save block with everything on, haptics included
+            state[0] |= 0x80;   // audio control valid
+            state[1] |= 0x02;   // mute control valid
+            state[7]  = 0x09;   // audio control
+            state[9]  = 0x00;   // no power save, nothing muted
         }
         report.output0x31.crc = crc32CalculateWithSeed(CrcSeed, report.output0x31.data, sizeof(report.output0x31.data));
 
         Result rc = this->WriteDataReport(&report, sizeof(report.output0x31) + sizeof(report.id));
-        if (R_FAILED(rc) && send_trigger_effects) {
-            // Effects didn't reach the controller, retry them with the next report
-            m_trigger_effects_dirty = true;
+        if (R_FAILED(rc)) {
+            // Didn't reach the controller, retry with the next report
+            if (send_trigger_effects) {
+                m_trigger_effects_dirty = true;
+            }
+            if (send_audio) {
+                m_haptics_audio_pending = true;
+            }
         }
 
         R_RETURN(rc);

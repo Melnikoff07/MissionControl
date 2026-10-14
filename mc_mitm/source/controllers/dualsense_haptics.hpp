@@ -28,6 +28,9 @@ namespace ams::controller::haptics {
 
     // Called by controllers after writing a haptics report
     void NoteReportResult(Result rc);
+    void NotePrimeResult(u32 failed_mask);
+    void NoteChirp();
+    void NoteFallback();
 
     void GetStatus(HapticsStatus *out);
 

@@ -177,14 +177,18 @@ namespace ams::controller {
             , m_lightbar_override_active(false)
             , m_player_colour({0, 0, 0})
             , m_hd_haptics(false)
-            , m_haptics_audio_init(false)
+            , m_packet_output(false)
+            , m_output_seq(0)
+            , m_haptics_audio_pending(false)
+            , m_haptics_ready(false)
             , m_haptics_gain(1.0f)
             , m_haptics_motors({})
             , m_haptics_phase{}
-            , m_haptics_seq(0)
             , m_haptics_counter(0)
             , m_haptics_silent_reports(0)
-            , m_haptics_chirp_reports(0) { }
+            , m_haptics_chirp_reports(0)
+            , m_haptics_failures(0)
+            , m_haptics_resume_tick(0) { }
 
             virtual Result Initialize() override;
             virtual Result SetVibration(const SwitchMotorData *motor_data) override;
@@ -205,7 +209,9 @@ namespace ams::controller {
 
             Result GetVersionInfo(DualsenseVersionInfo *version_info);
             Result GetCalibrationData(DualsenseImuCalibrationData *calibration);
+            void PrimeAudioFeatures();
             Result PushRumbleLedState();
+            void HandleHapticsWriteFailure(Result rc);
             void HandleTriggerTestCombo(const DualsenseButtonData &buttons);
 
             u8 m_feature_flags0;
@@ -237,16 +243,21 @@ namespace ams::controller {
             RGBColour m_player_colour;  // Colour from SetPlayerLed, restored when the override is cleared
 
             // HD haptics: the game's HD rumble synthesised as audio for the voice coils
-            bool m_hd_haptics;
-            bool m_haptics_audio_init;
+            std::atomic<bool> m_hd_haptics;     // cleared when the controller falls back to the simplified rumble
+            bool m_packet_output;               // 0x31 reports in the sequenced packet format used together with 0x32 (set at connect)
+            os::SdkMutex m_output_lock;         // one output report at a time, so sequence numbers go out in order
+            u8 m_output_seq;                    // sequence number shared by 0x31 and 0x32 reports, under m_output_lock
+            std::atomic<bool> m_haptics_audio_pending;  // audio control / unmute still has to be sent with a 0x31 report
+            std::atomic<bool> m_haptics_ready;  // connect sequence done, the haptics thread may stream
             float m_haptics_gain;
             os::SdkMutex m_haptics_lock;
             SwitchMotorData m_haptics_motors;   // latest decoded rumble, written by SetVibration
             float m_haptics_phase[4];           // oscillator phases: left low/high, right low/high
-            u8 m_haptics_seq;
             u8 m_haptics_counter;
             u32 m_haptics_silent_reports;
-            u32 m_haptics_chirp_reports;        // startup test sweep, so the stream can be verified without a game
+            u32 m_haptics_chirp_reports;        // startup test buzz, so the stream can be verified without a game
+            u32 m_haptics_failures;             // failed 0x32 writes on this connection
+            u64 m_haptics_resume_tick;          // streaming paused until this tick after a failed write
 
             DualsenseVersionInfo m_version_info;
             DualsenseImuCalibrationData m_motion_calibration;

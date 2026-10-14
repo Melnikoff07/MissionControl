@@ -45,6 +45,9 @@ namespace ams::controller {
         u32 reports_sent;   // 0x32 reports written successfully
         u32 reports_failed;
         u32 last_error;     // Result of the last failed write
+        u32 prime_failed;   // feature reads 0x09/0x22 at connect that failed (bit 0 = 0x09, bit 1 = 0x22), last controller
+        u32 chirps;         // startup test buzzes started (one per connected controller)
+        u32 fallbacks;      // controllers that gave up on HD haptics after write failures
     };
 
     static_assert(sizeof(TriggerEffect) == 11);

@@ -64,6 +64,18 @@ namespace ams::controller::haptics {
         }
     }
 
+    void NotePrimeResult(u32 failed_mask) {
+        g_status.prime_failed = failed_mask;
+    }
+
+    void NoteChirp() {
+        ++g_status.chirps;
+    }
+
+    void NoteFallback() {
+        ++g_status.fallbacks;
+    }
+
     void GetStatus(HapticsStatus *out) {
         *out = g_status;
     }
