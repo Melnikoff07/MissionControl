@@ -41,7 +41,8 @@ namespace ams::mitm {
                 .dualsense_adaptive_trigger_travel = 0,
                 .dualsense_trigger_test_mode = false,
                 .dualsense_hd_haptics = false,
-                .dualsense_haptics_gain = 100
+                .dualsense_haptics_gain = 100,
+                .dualsense_haptics_variant = 1
             }
         };
 
@@ -122,6 +123,8 @@ namespace ams::mitm {
                     ParseBoolean(value, &config->misc.dualsense_hd_haptics);
                 } else if (strcasecmp(name, "dualsense_haptics_gain") == 0) {
                     ParseInt(value, &config->misc.dualsense_haptics_gain, 0, 400);
+                } else if (strcasecmp(name, "dualsense_haptics_variant") == 0) {
+                    ParseInt(value, &config->misc.dualsense_haptics_variant, 1, 3);
                 }
             } else {
                 return 0;
