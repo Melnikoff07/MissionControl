@@ -187,6 +187,7 @@ namespace ams::controller {
             , m_haptics_counter(0)
             , m_haptics_silent_reports(0)
             , m_haptics_chirp_reports(0)
+            , m_haptics_probe_ticks(0)
             , m_haptics_failures(0)
             , m_haptics_resume_tick(0) { }
 
@@ -212,6 +213,7 @@ namespace ams::controller {
             void PrimeAudioFeatures();
             Result PushRumbleLedState();
             void HandleHapticsWriteFailure(Result rc);
+            Result WriteLightbarProbe(u8 report_id, RGBColour colour);
             void HandleTriggerTestCombo(const DualsenseButtonData &buttons);
 
             u8 m_feature_flags0;
@@ -256,6 +258,7 @@ namespace ams::controller {
             u8 m_haptics_counter;
             u32 m_haptics_silent_reports;
             u32 m_haptics_chirp_reports;        // startup test buzz, so the stream can be verified without a game
+            u32 m_haptics_probe_ticks;          // startup lightbar probe: which report formats reach the controller
             u32 m_haptics_failures;             // failed 0x32 writes on this connection
             u64 m_haptics_resume_tick;          // streaming paused until this tick after a failed write
 

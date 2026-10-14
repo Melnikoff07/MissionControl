@@ -96,7 +96,13 @@ namespace ams::controller {
         constexpr size_t HapticsReportSize   = 142;
         constexpr size_t HapticsSamplesStart = 13;
         constexpr u32 HapticsSilentReportsBeforeStop = 10; // keep sending silence ~100 ms, then stop
-        constexpr u32 HapticsChirpReports = 48;            // ~0.5 s test sweep after connecting
+        constexpr u32 HapticsChirpReports = 141;           // ~1.5 s test sweep after connecting
+
+        // Startup lightbar probe, in haptics thread ticks (~94 per second): magenta sent in 0x32 reports, then cyan in
+        // packet format 0x31 reports, then the real colour and the test sweep. The colours seen show which formats work.
+        constexpr u32 HapticsProbe0x32Ticks = 188;
+        constexpr u32 HapticsProbe0x31Ticks = 376;
+        constexpr u32 HapticsProbeInterval  = 10;
         constexpr u32 HapticsMaxFailures = 3;              // failed 0x32 writes before falling back to the simplified rumble
         constexpr u64 HapticsPauseNs = 1'000'000'000;      // pause after a failed write, lets the Bluetooth link drain
 
@@ -301,7 +307,7 @@ namespace ams::controller {
 
             haptics::NotePrimeResult(prime_failed);
             haptics::NoteChirp();
-            m_haptics_chirp_reports = HapticsChirpReports;
+            m_haptics_probe_ticks = 0;
             m_haptics_ready = true;
         }
 
@@ -413,6 +419,22 @@ namespace ams::controller {
             m_haptics_resume_tick = 0;
         }
 
+        if (m_haptics_probe_ticks <= HapticsProbe0x31Ticks) {
+            u32 t = m_haptics_probe_ticks++;
+            if (t == HapticsProbe0x31Ticks) {
+                // Probe done: back to the real colour, then the test sweep
+                R_DISCARD(this->PushRumbleLedState());
+                m_haptics_chirp_reports = HapticsChirpReports;
+            } else if (t % HapticsProbeInterval == 0) {
+                if (t < HapticsProbe0x32Ticks) {
+                    R_DISCARD(this->WriteLightbarProbe(0x32, {0xFF, 0x00, 0xFF}));
+                } else {
+                    R_DISCARD(this->WriteLightbarProbe(0x31, {0x00, 0xFF, 0xFF}));
+                }
+            }
+            return;
+        }
+
         SwitchMotorData motors;
         {
             std::scoped_lock lk(m_haptics_lock);
@@ -423,7 +445,7 @@ namespace ams::controller {
         if (m_haptics_chirp_reports > 0) {
             float progress = 1.0f - float(m_haptics_chirp_reports) / HapticsChirpReports;
             float freq = 100.0f + 200.0f * progress;
-            motors.left_motor  = { .low_band_amp = 0.8f, .low_band_freq = freq, .high_band_amp = 0.0f, .high_band_freq = 320.0f };
+            motors.left_motor  = { .low_band_amp = 1.0f, .low_band_freq = freq, .high_band_amp = 0.0f, .high_band_freq = 320.0f };
             motors.right_motor = motors.left_motor;
             --m_haptics_chirp_reports;
         }
@@ -486,6 +508,40 @@ namespace ams::controller {
         if (R_FAILED(rc)) {
             this->HandleHapticsWriteFailure(rc);
         }
+    }
+
+    Result DualsenseController::WriteLightbarProbe(u8 report_id, RGBColour colour) {
+        // Only the lightbar colour in a set state packet. 0x31: seq, packet 0x10 (unsized) at [1..2];
+        // 0x32: seq, packet 0x10 sized as DS5Dongle sends it (0x90, length 63) at [1..3]
+        u8 report[HapticsReportSize] = {};
+        size_t size = report_id == 0x32 ? HapticsReportSize : sizeof(DualsenseOutputReport0x31) + 1;
+        u8 *state;
+        report[0] = report_id;
+        if (report_id == 0x32) {
+            report[2] = 0x90;
+            report[3] = 0x3F;
+            state = &report[4];
+        } else {
+            report[2] = 0x10;
+            state = &report[3];
+        }
+        state[1]  = 0x04;           // lightbar colour valid
+        state[38] = 0x02 | 0x01;
+        state[41] = 0x02;
+        state[42] = 0x02;
+        state[44] = colour.r;
+        state[45] = colour.g;
+        state[46] = colour.b;
+
+        const u8 header[2] = { 0xA2, report_id };
+        u32 seed = crc32Calculate(header, sizeof(header));
+
+        std::scoped_lock lk(m_output_lock);
+        report[1] = m_output_seq << 4;
+        m_output_seq = (m_output_seq + 1) & 0x0F;
+        u32 crc = crc32CalculateWithSeed(seed, &report[1], size - 1 - 4);
+        std::memcpy(&report[size - 4], &crc, sizeof(crc));
+        R_RETURN(this->WriteDataReport(report, size));
     }
 
     void DualsenseController::HandleHapticsWriteFailure(Result rc) {
