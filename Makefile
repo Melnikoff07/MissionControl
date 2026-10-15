@@ -1,7 +1,9 @@
 PROJECT_NAME := MissionControl
 MC_MITM_TID := 010000000000bd00
 
-GIT_BRANCH := $(shell git symbolic-ref --short HEAD | sed s/[^a-zA-Z0-9_-]/_/g)
+# Works as a submodule too: .git may be a file there, and HEAD is detached
+GIT_DIR := $(shell git rev-parse --absolute-git-dir)
+GIT_BRANCH := $(shell (git symbolic-ref -q --short HEAD || echo detached) | sed s/[^a-zA-Z0-9_-]/_/g)
 GIT_HASH := $(shell git rev-parse --short HEAD)
 GIT_TAG := $(shell git describe --tags `git rev-list --tags --max-count=1`)
 
@@ -13,7 +15,7 @@ TARGETS := mcmitm_version.cpp mc_mitm
 
 all: $(TARGETS)
 
-mcmitm_version.cpp: .git/HEAD .git/index
+mcmitm_version.cpp: $(GIT_DIR)/HEAD $(GIT_DIR)/index
 	echo "namespace ams::mc { unsigned int mc_version = $(VERSION); const char *mc_build_name = \"$(BUILD_VERSION)\"; const char *mc_build_date = \"$(BUILD_DATE)\"; }" > mc_mitm/source/$@
 
 mc_mitm:
